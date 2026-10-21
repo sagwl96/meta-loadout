@@ -1512,3 +1512,46 @@ test('creates a profile from scratch on desktop and vscode, off or on', async ($
     await ui.unmount()
   }
 })
+
+test('search filters rows, opens matching cards, matches kind label, clears', async ($, on) => {
+  harness(on, MANY_SETTINGS)
+  await loadout($, 'status')
+
+  for (const surface of ['desktop', 'vscode'] as const) {
+    const ui = await mountPane($, surface)
+
+    expect(await ui.find({ key: 'search-clear' })).toBeUndefined()
+    await ui.input({ key: 'search', text: 'ecc', kind: 'change' })
+    expect((await ui.find({ key: SKILL_TOGGLE }))?.text).toBe('On')
+    expect(await ui.find({ key: 'section:permission' })).toBeUndefined()
+    expect(await ui.find({ key: 'search-clear' })).toBeDefined()
+
+    await ui.input({ key: 'search', text: 'mcp', kind: 'change' })
+    expect(await ui.find({ key: 'section:mcp' })).toBeDefined()
+    expect(await ui.find({ key: SKILL_TOGGLE })).toBeUndefined()
+
+    await ui.input({ key: 'search', text: 'zzzz', kind: 'change' })
+    expect(await ui.find({ type: 'Text', text: /No elements match “zzzz”\./ })).toBeDefined()
+
+    await ui.press({ key: 'search-clear' })
+    expect(await ui.find({ key: 'section:skill' })).toBeDefined()
+    expect(await ui.find({ key: SKILL_TOGGLE })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('card All off with a query turns off only the matches', async ($, on) => {
+  harness(on, MANY_SETTINGS, {
+    commands: [{ name: 'other', description: 'Other', source: 'user' }],
+  })
+  await loadout($, 'status')
+  const ui = await mountPane($, 'desktop')
+  await ui.input({ key: 'search', text: 'ecc', kind: 'change' })
+  await ui.press({ key: 'bulk-off:skill' })
+
+  expect((await ui.find({ key: SKILL_TOGGLE }))?.text).toBe('Off')
+  await ui.press({ key: 'search-clear' })
+  await ui.press({ key: 'section:skill' })
+  expect((await ui.find({ key: 'toggle:skill:other' }))?.text).toBe('On')
+  await ui.unmount()
+})

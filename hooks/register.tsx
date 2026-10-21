@@ -89,6 +89,7 @@ const INITIAL_VIEW: View = {
   open: [],
   scope: 'all',
   page: 0,
+  query: '',
   project: '',
   picker: 'none',
   notice: '',
@@ -96,7 +97,7 @@ const INITIAL_VIEW: View = {
   target: '',
   viewed: '',
 }
-const VIEW_SHAPE = 'sections-v5'
+const VIEW_SHAPE = 'sections-v6'
 const FIRST_NAME_QUESTION =
   'What should meta-loadout call the profile that carries your current setup?'
 const FIRST_NAME_OPTIONS = {

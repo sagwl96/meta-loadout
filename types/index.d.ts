@@ -67,6 +67,7 @@ export type View = {
   open: Kind[]
   scope: Scope | 'all'
   page: number
+  query: string
   project: string
   picker: Picker
   notice: string

@@ -13,6 +13,7 @@ import {
   clipEnd,
   fileLinkOf,
   linesOf,
+  matchesQuery,
   withToggledSection,
 } from './view'
 import type { ItemLine, PaneActions, PaneModel, SectionLine } from './view'
@@ -49,7 +50,8 @@ export const drawDesktopPane = (
   { items, root, projects, profiles, profile, applied, isOn, view }: PaneModel,
   actions: PaneActions,
 ) => {
-  const lines = linesOf(items, isOn, view)
+  const query = view.query.trim()
+  const lines = linesOf(items, isOn, view, query)
   const pages = Math.max(1, Math.ceil(lines.length / DESKTOP_PAGE_SIZE))
   const page = Math.min(view.page, pages - 1)
   const shownLines = lines.slice(page * DESKTOP_PAGE_SIZE, (page + 1) * DESKTOP_PAGE_SIZE)
@@ -97,7 +99,12 @@ export const drawDesktopPane = (
   )
 
   const inScope = (kind: Kind) =>
-    items.filter(item => item.kind === kind && (view.scope === ALL || item.scope === view.scope))
+    items.filter(
+      item =>
+        item.kind === kind &&
+        (view.scope === ALL || item.scope === view.scope) &&
+        matchesQuery(item, query),
+    )
 
   const drawBulk = (key: string, among: readonly Item[]) => {
     const free = among.filter(item => !item.isLocked)
@@ -128,7 +135,12 @@ export const drawDesktopPane = (
         key={`section:${kind}`}
         plain
         label={`${isOpen ? '▾' : '▸'} ${KIND_LABELS[kind]}`}
-        onPress={() => actions.onView({ open: withToggledSection(view.open, kind), page })}
+        // a search shows every matching section open, so a press would change view.open unseen
+        onPress={() =>
+          view.query.trim() === ''
+            ? actions.onView({ open: withToggledSection(view.open, kind), page })
+            : undefined
+        }
       />
       <Box flexDirection="row" gap={2} alignItems="center">
         <Text backgroundColor="subtle">{` ${count - offCount}/${count} on `}</Text>
@@ -233,6 +245,22 @@ export const drawDesktopPane = (
         <Button key="refresh" plain label="Refresh" onPress={actions.onRefresh} />
       </Box>
       <Box flexDirection="row" gap={2} alignItems="flex-end" flexWrap="wrap">
+        <Input
+          key="search"
+          label="Search skills, plugins, MCP…"
+          placeholder="Search skills, plugins, MCP…"
+          value={view.query}
+          onInput={value => actions.onView({ query: value, page: 0 })}
+          onSubmit={value => actions.onView({ query: value, page: 0 })}
+        />
+        {view.query !== '' && (
+          <Button
+            key="search-clear"
+            label="Clear"
+            variant="secondary"
+            onPress={() => actions.onView({ query: '', page: 0 })}
+          />
+        )}
         <Select
           key="profile-select"
           label="Profile"
@@ -307,7 +335,11 @@ export const drawDesktopPane = (
       )}
       {isRenaming && drawNameField('rename', actions.onRename)}
       {view.notice !== '' && <Text dimColor>{clipEnd(view.notice, NAME_NOTICE_LIMIT)}</Text>}
-      {lines.length === 0 && <Text dimColor>Nothing here in this scope.</Text>}
+      {lines.length === 0 && (
+        <Text dimColor>
+          {query === '' ? 'Nothing here in this scope.' : `No elements match “${query}”.`}
+        </Text>
+      )}
       {drawCards()}
       {pages > 1 && (
         <Box flexDirection="row" gap={2} justifyContent="center" alignItems="center">

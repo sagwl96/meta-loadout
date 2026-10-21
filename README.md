@@ -51,7 +51,7 @@ Keys: Tab moves between controls, Enter presses, Esc returns to the prompt.
 
 ## Desktop app
 
-In the Claude desktop app and the VS Code extension the pane is a GUI instead of the terminal text view: dropdowns for profile, project and scope, an On/Off button per element, one card per kind (click its header to open it), scope chips, clickable file origins, and Prev/Next paging. Each card and each plugin group has **All on** and **All off**, and **New profile** creates a profile from scratch with everything on or off. The terminal keeps the text view.
+In the Claude desktop app and the VS Code extension the pane is a GUI instead of the terminal text view: dropdowns for profile, project and scope, an On/Off button per element, one card per kind (click its header to open it), scope chips, clickable file origins, and Prev/Next paging. Each card and each plugin group has **All on** and **All off**, and **New profile** creates a profile from scratch with everything on or off. A search bar finds elements by name, origin or kind (for example `mcp` or `ecc`), opens the matching cards and limits **All on** / **All off** to the matches. The terminal keeps the text view.
 
 ## What it manages
 

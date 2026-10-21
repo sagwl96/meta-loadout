@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   EMPTY_LEDGER,
+  KIND_LABELS,
   INITIAL_PROFILES,
   desiredState,
   findProfile,
@@ -16,6 +17,7 @@ import {
   withoutLegacyNames,
   withOverride,
 } from '../hooks/model'
+import { matchesQuery } from '../hooks/view'
 import type { Item, Profile } from '../types'
 
 const DEFAULT = INITIAL_PROFILES[0]!
@@ -217,5 +219,19 @@ describe('profiles', () => {
     expect(isValidProfileName('superpowers-ponytail')).toBe(true)
     expect(isValidProfileName('../etc')).toBe(false)
     expect(isValidProfileName('')).toBe(false)
+  })
+})
+
+describe('matchesQuery', () => {
+  test('matches name, origin and kind label case-insensitively; empty matches all', () => {
+    const mcp: Item = { ...SKILL, id: 'mcp:gh', kind: 'mcp', name: 'github', origin: '/x/.mcp.json' }
+
+    expect(matchesQuery(SKILL, '')).toBe(true)
+    expect(matchesQuery(SKILL, '  ECC ')).toBe(true)
+    expect(matchesQuery(SKILL, 'plan')).toBe(true)
+    expect(matchesQuery(SKILL, 'nope')).toBe(false)
+    expect(matchesQuery(mcp, 'mcp')).toBe(true)
+    expect(matchesQuery(SKILL, 'mcp')).toBe(false)
+    expect(matchesQuery(SKILL, KIND_LABELS.skill.toUpperCase())).toBe(true)
   })
 })

@@ -90,19 +90,32 @@ const pageSize = (rows: number, menuRows = 0) =>
 export const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
   open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind]
 
+export const matchesQuery = ({ name, origin, kind }: Item, query: string) => {
+  const needle = query.trim().toLowerCase()
+
+  return (
+    needle === '' ||
+    [name, origin, KIND_LABELS[kind]].some(text => text.toLowerCase().includes(needle))
+  )
+}
+
 export const linesOf = (
   items: readonly Item[],
   isOn: (item: Item) => boolean,
   view: View,
+  query = '',
 ): Line[] => {
-  const visible = items.filter(item => view.scope === ALL || item.scope === view.scope)
+  const visible = items.filter(
+    item => (view.scope === ALL || item.scope === view.scope) && matchesQuery(item, query),
+  )
+  const isSearching = query.trim() !== ''
 
   return KINDS.flatMap((kind): Line[] => {
     const ofKind = visible.filter(item => item.kind === kind)
     if (ofKind.length === 0) return []
     if (KINDS_WITHOUT_SECTION.includes(kind))
       return ofKind.map(item => ({ item, isInSection: false }))
-    const isOpen = view.open.includes(kind)
+    const isOpen = isSearching || view.open.includes(kind)
 
     return [
       {
