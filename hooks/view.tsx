@@ -11,9 +11,11 @@ export type PaneElements = Pick<
 
 export type PaneActions = {
   onToggle: (id: string) => void
+  onSetMany: (ids: string[], isOn: boolean) => void
   onAction: (name: string, action: ProfileAction) => void
   onCreate: (name: string) => void
   onRename: (name: string) => void
+  onCreateNew: (name: string, base: 'on' | 'off') => void
   onRefresh: () => void
   onProject: (path: string) => void
   onView: (patch: Partial<View>) => void
@@ -33,9 +35,9 @@ export type PaneModel = {
   isDocked: boolean
 }
 
-type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
-type ItemLine = { item: Item; isInSection: boolean }
-type Line = SectionLine | ItemLine
+export type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
+export type ItemLine = { item: Item; isInSection: boolean }
+export type Line = SectionLine | ItemLine
 type PickerOption = { value: string; label: string }
 type OpenPicker = Exclude<Picker, 'none'>
 
@@ -47,16 +49,16 @@ const INDENT_COLUMNS = 2
 const CHECKBOX_COLUMNS = 1
 const SCOPE_COLUMNS = 9
 const NAME_SHARE = 0.5
-const ALL = 'all'
+export const ALL = 'all'
 const CHECKED = '☑'
 const UNCHECKED = '☐'
 const OPEN_MARK = '▾'
 const CLOSED_MARK = '▸'
 const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
-const PROFILE_KEY_PREFIX = 'profile:'
+export const PROFILE_KEY_PREFIX = 'profile:'
 const MENU_KEY_PREFIX = 'menu:'
-const ACTION_KEY_PREFIX = 'action:'
-const PICKER_KEY_PREFIX = 'picker:'
+export const ACTION_KEY_PREFIX = 'action:'
+export const PICKER_KEY_PREFIX = 'picker:'
 const PICK_KEY_PREFIX = 'pick:'
 const PICKER_LABELS: Readonly<Record<OpenPicker, string>> = {
   project: 'Project',
@@ -68,27 +70,27 @@ const ORIGIN_NOTE = / (\(@import from .*\)|or commands)$/
 const FILE_SCHEME = 'file://'
 const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
-const NAME_FIELDS = {
+export const NAME_FIELDS = {
   new: { key: 'new-profile-name', verb: 'Duplicate', submitLabel: 'create' },
   rename: { key: 'rename-profile-name', verb: 'Rename', submitLabel: 'rename' },
 } as const
 
-const clipEnd = (text: string, width: number) =>
+export const clipEnd = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, Math.max(1, width - 1))}…` : text
 
 const clipStart = (text: string, width: number) =>
   text.length > width ? `…${text.slice(text.length - Math.max(1, width - 1))}` : text
 
-const actionsOf = (name: string) =>
+export const actionsOf = (name: string) =>
   isFixedProfile(name) ? FIXED_PROFILE_ACTIONS : PROFILE_ACTIONS
 
 const pageSize = (rows: number, menuRows = 0) =>
   Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS - menuRows)
 
-const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
+export const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
   open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind]
 
-const linesOf = (
+export const linesOf = (
   items: readonly Item[],
   isOn: (item: Item) => boolean,
   view: View,
@@ -116,7 +118,7 @@ const linesOf = (
 
 export const menuKeyOf = (name: string) => `${MENU_KEY_PREFIX}${name}`
 
-const fileLinkOf = (origin: string) =>
+export const fileLinkOf = (origin: string) =>
   origin.startsWith('/')
     ? `${FILE_SCHEME}${origin.replace(ORIGIN_NOTE, '').split('/').map(encodeURIComponent).join('/')}`
     : undefined
@@ -131,7 +133,7 @@ export const drawBand = (
       key="open-pane"
       plain
       dimColor
-      label={`↗ loadout · ${profileName}`}
+      label={`↗ meta-loadout · ${profileName}`}
       onPress={onOpen}
     />
   </Box>
@@ -353,7 +355,7 @@ export const drawPane = (
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexDirection="row" gap={1}>
           <Text bold color="claude">
-            Loadout
+            Meta Loadout
           </Text>
           <Text dimColor>{profile.name}</Text>
         </Box>

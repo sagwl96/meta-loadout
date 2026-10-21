@@ -1,6 +1,6 @@
 import type { Item, Kind, Ledger, Profile, Scope } from '../types'
 
-export const PLUGIN = 'loadout'
+export const PLUGIN = 'meta-loadout'
 export const DEFAULT_PROFILE_NAME = 'default'
 export const VANILLA_PROFILE_NAME = 'vanilla'
 export const DEFAULT_PROFILE: Profile = {

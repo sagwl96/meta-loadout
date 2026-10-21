@@ -59,9 +59,11 @@ import {
   withSessionFiles,
 } from './project'
 import { isObject, isSoundStashedItem } from './settingsEdit'
+import { drawDesktopPane } from './desktopView'
 import { drawBand, drawPane, menuKeyOf } from './view'
+import type { PaneActions, PaneModel } from './view'
 
-const PANE = 'loadout'
+const PANE = 'meta-loadout'
 const PANE_ROWS = 24
 const FALLBACK_ROWS = 30
 const FALLBACK_COLUMNS = 100
@@ -77,7 +79,7 @@ const LOCKED_SOURCES = [
 const READ_ONLY_VERBS = ['', 'list', 'status']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const USAGE =
-  'Usage: /loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
+  'Usage: /meta-loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
 const NO_ITEMS: Item[] = []
 const NO_PROJECTS: string[] = []
 const MAX_RULES_DEPTH = 4
@@ -96,23 +98,23 @@ const INITIAL_VIEW: View = {
 }
 const VIEW_SHAPE = 'sections-v5'
 const FIRST_NAME_QUESTION =
-  'What should loadout call the profile that carries your current setup?'
+  'What should meta-loadout call the profile that carries your current setup?'
 const FIRST_NAME_OPTIONS = {
   header: 'Profile',
   options: [DEFAULT_PROFILE_NAME, 'personal'],
 } as const
 
-const profilesAtom = atom({ plugin: 'loadout', key: 'profiles' } as const, STARTING_PROFILES)
-const activeAtom = atom({ plugin: 'loadout', key: 'active' } as const, DEFAULT_PROFILE_NAME)
-const loadedAtom = atom({ plugin: 'loadout', key: 'isLoaded' } as const, false)
-const seenAtom = atom({ plugin: 'loadout', key: 'seen' } as const, NO_ITEMS)
-const itemsAtom = atom({ plugin: 'loadout', key: 'items' } as const, NO_ITEMS)
-const projectsAtom = atom({ plugin: 'loadout', key: 'projects' } as const, NO_PROJECTS)
+const profilesAtom = atom({ plugin: 'meta-loadout', key: 'profiles' } as const, STARTING_PROFILES)
+const activeAtom = atom({ plugin: 'meta-loadout', key: 'active' } as const, DEFAULT_PROFILE_NAME)
+const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
+const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
+const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
+const projectsAtom = atom({ plugin: 'meta-loadout', key: 'projects' } as const, NO_PROJECTS)
 const projectItemsAtom = atom(
-  { plugin: 'loadout', key: 'projectItems' } as const,
+  { plugin: 'meta-loadout', key: 'projectItems' } as const,
   NO_ITEMS,
 )
-const viewAtom = atom({ plugin: 'loadout', key: 'view' } as const, INITIAL_VIEW, {
+const viewAtom = atom({ plugin: 'meta-loadout', key: 'view' } as const, INITIAL_VIEW, {
   shape: VIEW_SHAPE,
 })
 
@@ -221,7 +223,7 @@ const focusShown = async ($: EngineInterface) => {
     })
     if (deny !== undefined) throw new Error(deny)
   } catch (error) {
-    $.ui.log(`loadout left the focus where it was: ${messageOf(error)}`, { to: 'debug' })
+    $.ui.log(`meta-loadout left the focus where it was: ${messageOf(error)}`, { to: 'debug' })
   }
 }
 
@@ -475,7 +477,7 @@ const setPersisted = async ($: EngineInterface, item: Item, isOn: boolean) => {
   if (path !== item.origin)
     throw new Error(`${item.name} belongs to ${item.origin}, not to this project`)
   if (item.entry.source !== 'user' && (await isSymbolicLink($, path)))
-    throw new Error(`${path} is a symbolic link; loadout does not write through it`)
+    throw new Error(`${path} is a symbolic link; meta-loadout does not write through it`)
   const { value, text } = await readObject($, path)
   const ledger = await loadLedger($)
   const rewritten = rewrittenSettings(
@@ -490,6 +492,46 @@ const setPersisted = async ($: EngineInterface, item: Item, isOn: boolean) => {
   if (isOn) await $.store.set(LEDGER_KEY, ledgerAfter(ledger, item, true))
 }
 
+const change = async (
+  $: EngineInterface,
+  profile: Profile,
+  items: readonly Item[],
+  target: (current: boolean) => boolean,
+) => {
+  const isApplied = profile.name === (await activeProfile($)).name
+  const ledger = await loadLedger($)
+  const changed: Item[] = []
+  const errors: { item: Item; message: string }[] = []
+  let next = profile
+  for (const item of items) {
+    const current = isOnIn(profile, item, ledger, isApplied)
+    const isOn = target(current)
+    if (isOn === current) continue
+    try {
+      if (isApplied) await setPersisted($, item, isOn)
+      next = withOverride(next, item.id, isOn)
+      changed.push(item)
+    } catch (error) {
+      errors.push({ item, message: messageOf(error) })
+    }
+  }
+  if (changed.length > 0)
+    await saveProfiles($, upsertProfile(await profilesOf($), next))
+  await refresh($)
+  if (changed.length > 0) invalidateGates($)
+  const hint =
+    isApplied && changed.some(item => item.kind === 'plugin')
+      ? ' Run /reload-plugins to apply.'
+      : ''
+
+  return { changed, errors, hint, overrides: next.overrides }
+}
+
+const refusedProfile = (profile: Profile) =>
+  isFixedProfile(profile.name)
+    ? `"${profile.name}" is built in and cannot be changed; duplicate it first.`
+    : undefined
+
 const toggle = async ($: EngineInterface, id: string) => {
   const item = (await shownItems($)).find(one => one.id === id)
   if (item === undefined) {
@@ -500,29 +542,37 @@ const toggle = async ($: EngineInterface, id: string) => {
   if (item.isLocked)
     return say($, `${item.name} is locked by the ${item.scope} scope and stays on.`)
   const profile = await shownProfile($)
-  if (isFixedProfile(profile.name))
-    return say($, `"${profile.name}" is built in and cannot be changed; duplicate it first.`)
-  const isApplied = profile.name === (await activeProfile($)).name
-  const isOn = !isOnIn(profile, item, await loadLedger($), isApplied)
-  try {
-    if (isApplied) await setPersisted($, item, isOn)
-  } catch (error) {
-    await refresh($)
-
-    return say($, `Could not change ${item.name}: ${messageOf(error)}`)
-  }
-  await saveProfiles(
-    $,
-    upsertProfile(await profilesOf($), withOverride(profile, id, isOn)),
-  )
-  await refresh($)
-  invalidateGates($)
-  const hint = isApplied && item.kind === 'plugin' ? ' Run /reload-plugins to apply.' : ''
+  const refused = refusedProfile(profile)
+  if (refused !== undefined) return say($, refused)
+  const { errors, hint, overrides } = await change($, profile, [item], current => !current)
+  if (errors[0] !== undefined)
+    return say($, `Could not change ${item.name}: ${errors[0].message}`)
+  const isOn = overrides[id] === true
 
   return say(
     $,
     `${item.name} is ${isOn ? 'on' : 'off'} in profile "${profile.name}".${hint}`,
   )
+}
+
+const setMany = async ($: EngineInterface, ids: readonly string[], isOn: boolean) => {
+  const profile = await shownProfile($)
+  const refused = refusedProfile(profile)
+  if (refused !== undefined) return say($, refused)
+  const items = (await shownItems($)).filter(
+    item => ids.includes(item.id) && !item.isLocked,
+  )
+  const { changed, errors, hint } = await change($, profile, items, () => isOn)
+  const failures =
+    errors.length === 0
+      ? ''
+      : ` Failed: ${errors.map(one => `${one.item.name}: ${one.message}`).join('; ')}.`
+  const done =
+    changed.length === 0 && errors.length === 0
+      ? 'Nothing to change.'
+      : `Turned ${isOn ? 'on' : 'off'} ${changed.length} element${changed.length === 1 ? '' : 's'} in profile "${profile.name}".${hint}`
+
+  return say($, `${done}${failures}`)
 }
 
 const reconcile = async ($: EngineInterface, profile: Profile) => {
@@ -701,14 +751,14 @@ const isHookEventMuted = async ($: EngineInterface, event: string) => {
 }
 
 const offNote = async ($: EngineInterface, what: string) =>
-  `${what} is turned off in the active loadout profile "${(await activeProfile($)).name}". Re-enable it with /loadout.`
+  `${what} is turned off in the active meta-loadout profile "${(await activeProfile($)).name}". Re-enable it with /meta-loadout.`
 
 const openPane = async ($: EngineInterface) => {
   await refresh($)
   await refreshProjects($)
-  await $.ui.open({ id: PANE, title: 'Loadout', focus: true, rows: PANE_ROWS })
+  await $.ui.open({ id: PANE, title: 'Meta Loadout', focus: true, rows: PANE_ROWS })
 
-  return 'Loadout pane opened.'
+  return 'Meta Loadout pane opened.'
 }
 
 const listProfiles = async ($: EngineInterface) => {
@@ -736,7 +786,7 @@ const status = async ($: EngineInterface) => {
 const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin) => {
   const [verb = '', name = '', option = ''] = args.trim().split(/\s+/)
   if (!READ_ONLY_VERBS.includes(verb) && !PERSON_ORIGINS.includes(origin.kind))
-    return 'Only the person at the prompt can change loadout profiles.'
+    return 'Only the person at the prompt can change meta-loadout profiles.'
   await ensureLoaded($)
   if (verb === '') return openPane($)
   if (verb === 'list') return listProfiles($)
@@ -757,7 +807,7 @@ const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'loadout',
+      name: 'meta-loadout',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
       argumentHint:
         '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | project [<folder>]]',
@@ -766,22 +816,22 @@ export const register: Register = on => {
       const isFirstRun = await loadOnce($)
       if (isFirstRun)
         void nameFirstProfile($).catch(error =>
-          $.ui.log(`loadout kept the name "default": ${messageOf(error)}`, {
+          $.ui.log(`meta-loadout kept the name "default": ${messageOf(error)}`, {
             to: 'debug',
           }),
         )
     } catch (error) {
-      $.ui.log(`loadout could not read the harness: ${messageOf(error)}`)
+      $.ui.log(`meta-loadout could not read the harness: ${messageOf(error)}`)
     }
 
     return next(e)
   })
 
-  on('command.run', { command: 'loadout' }, async ($, e) => {
+  on('command.run', { command: 'meta-loadout' }, async ($, e) => {
     try {
       return { text: await runCommand($, e.args, e.origin) }
     } catch (error) {
-      return { text: `loadout failed: ${messageOf(error)}` }
+      return { text: `meta-loadout failed: ${messageOf(error)}` }
     }
   })
 
@@ -790,7 +840,7 @@ export const register: Register = on => {
       await ensureLoaded($)
       await refresh($)
     } catch (error) {
-      $.ui.log(`loadout could not refresh the harness: ${messageOf(error)}`)
+      $.ui.log(`meta-loadout could not refresh the harness: ${messageOf(error)}`)
     }
 
     return next(e)
@@ -801,7 +851,7 @@ export const register: Register = on => {
     const files = answered.instructionFiles ?? e.instructionFiles
     if (files === undefined) return answered
     await ensureLoaded($).catch(error =>
-      $.ui.log(`loadout could not read the harness: ${messageOf(error)}`),
+      $.ui.log(`meta-loadout could not read the harness: ${messageOf(error)}`),
     )
     const profile = await activeProfile($)
     const folders = await userFolders($)
@@ -833,7 +883,7 @@ export const register: Register = on => {
 
     return {
       ...described,
-      description: `[off in loadout] ${described.description}`,
+      description: `[off in meta-loadout] ${described.description}`,
       isHidden: true,
     }
   })
@@ -860,7 +910,7 @@ export const register: Register = on => {
 
     return {
       ...described,
-      description: `[Disabled by the user's loadout profile: do not call.] ${described.description}`,
+      description: `[Disabled by the user's meta-loadout profile: do not call.] ${described.description}`,
     }
   })
 
@@ -975,18 +1025,20 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    if (e.surface !== 'terminal' && e.surface !== 'desktop' && e.surface !== 'vscode')
+      return next(e)
 
     return drawBand($.ui.resolve(e), (await activeProfile($)).name, () =>
       void openPane($).catch(error =>
-        $.ui.toast(`loadout could not open its pane: ${messageOf(error)}`),
+        $.ui.toast(`meta-loadout could not open its pane: ${messageOf(error)}`),
       ),
     )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    const report = (error: unknown) => void say($, `loadout failed: ${messageOf(error)}`)
+    if (e.surface !== 'terminal' && e.surface !== 'desktop' && e.surface !== 'vscode')
+      return next(e)
+    const report = (error: unknown) => void say($, `meta-loadout failed: ${messageOf(error)}`)
 
     const view = await read($, viewAtom)
     const applied = (await activeProfile($)).name
@@ -994,41 +1046,47 @@ export const register: Register = on => {
     const isApplied = profile.name === applied
     const ledger = isApplied ? EMPTY_LEDGER : await loadLedger($)
 
-    return drawPane(
-      $.ui.resolve(e),
-      {
-        items: await shownItems($),
-        root: await $.session.root(),
-        projects: await read($, projectsAtom),
-        profiles: await profilesOf($),
-        profile,
-        applied,
-        isOn: item => isOnIn(profile, item, ledger, isApplied),
-        view,
-        columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
-        rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
-        isDocked: e.props.placement === 'dock',
-      },
-      {
-        onToggle: id => void inTurn($, () => toggle($, id)).catch(report),
-        onAction: (name, action) =>
-          void inTurn($, () => runProfileAction($, name, action)).catch(report),
-        onCreate: typed =>
-          void inTurn($, () =>
-            submitName($, typed, name => duplicateProfile($, view.target, name)),
-          ).catch(report),
-        onRename: typed =>
-          void inTurn($, () =>
-            submitName($, typed, name => renameTo($, view.target, name)),
-          ).catch(report),
-        onRefresh: () =>
-          void refresh($)
-            .then(() => refreshProjects($))
-            .then(() => setView($, { notice: 'Refreshed.' }))
-            .catch(report),
-        onProject: path => void showProject($, path).catch(report),
-        onView: patch => void setView($, patch).catch(report),
-      },
-    )
+    const model: PaneModel = {
+      items: await shownItems($),
+      root: await $.session.root(),
+      projects: await read($, projectsAtom),
+      profiles: await profilesOf($),
+      profile,
+      applied,
+      isOn: item => isOnIn(profile, item, ledger, isApplied),
+      view,
+      columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
+      rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
+      isDocked: e.props.placement === 'dock',
+    }
+    const actions: PaneActions = {
+      onToggle: id => void inTurn($, () => toggle($, id)).catch(report),
+      onSetMany: (ids, isOn) => void inTurn($, () => setMany($, ids, isOn)).catch(report),
+      onAction: (name, action) =>
+        void inTurn($, () => runProfileAction($, name, action)).catch(report),
+      onCreate: typed =>
+        void inTurn($, () =>
+          submitName($, typed, name => duplicateProfile($, view.target, name)),
+        ).catch(report),
+      onRename: typed =>
+        void inTurn($, () =>
+          submitName($, typed, name => renameTo($, view.target, name)),
+        ).catch(report),
+      onCreateNew: (typed, base) =>
+        void inTurn($, () =>
+          submitName($, typed, name => createProfile($, name, base)),
+        ).catch(report),
+      onRefresh: () =>
+        void refresh($)
+          .then(() => refreshProjects($))
+          .then(() => setView($, { notice: 'Refreshed.' }))
+          .catch(report),
+      onProject: path => void showProject($, path).catch(report),
+      onView: patch => void setView($, patch).catch(report),
+    }
+
+    return e.surface === 'terminal'
+      ? drawPane($.ui.resolve(e), model, actions)
+      : drawDesktopPane($.ui.resolve(e), model, actions)
   })
 }

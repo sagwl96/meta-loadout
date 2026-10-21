@@ -57,7 +57,7 @@ export type Profile = {
   overrides: Record<string, boolean>
 }
 
-export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename'
+export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename' | 'create-on' | 'create-off'
 
 export type Picker = 'none' | 'project' | 'scope'
 
@@ -84,7 +84,7 @@ export type Ledger = {
 
 declare module 'claude-code' {
   interface PluginState {
-    loadout: {
+    'meta-loadout': {
       profiles: Profile[]
       active: string
       isLoaded: boolean

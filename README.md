@@ -1,25 +1,39 @@
-# loadout
+# meta-loadout
 
-A Claude Code mod that manages your harness: every skill, rule, memory, MCP server, hook, plugin, permission and setting, with one switch each and profiles to swap whole setups.
+A Claude Code mod that manages your harness: every skill, rule, memory, MCP server, hook, plugin, permission and setting, with one switch each and profiles to swap whole setups. It works in the terminal and in a GUI pane for the Claude desktop app and the VS Code extension.
 
-![The loadout pane next to a Claude Code session](assets/showcase.png)
+Based on [loadout](https://github.com/MK27MK/loadout) by Mattia Carella (MIT). meta-loadout adds:
+
+- a desktop / VS Code GUI pane (`hooks/desktopView.tsx`)
+- **All on / All off** per card (kind) and per plugin group
+- **New profile** from scratch, with everything on or everything off
+
+![The meta-loadout desktop pane](assets/desktop-pane.png)
+
+*Illustration of the desktop pane (drawn from its layout, not a screenshot).*
 
 ## Install
 
 ```
-/plugin marketplace add MK27MK/loadout
-/plugin install loadout@loadout
+/plugin marketplace add sagwl96/meta-loadout
+/plugin install meta-loadout@meta-loadout
 ```
+
+In the Claude desktop app: **+** next to the prompt box, then Plugins, Add marketplace `sagwl96/meta-loadout`, then Add plugin.
 
 To run it from a local clone instead:
 
 ```
-claude --plugin-dir path/to/loadout
+claude --plugin-dir path/to/meta-loadout
 ```
 
 ## The pane
 
-`/loadout` opens the pane. Elements are grouped by kind, and each row is one harness element:
+![The terminal pane next to a Claude Code session](assets/showcase.png)
+
+*The terminal pane, from the original loadout.*
+
+`/meta-loadout` opens the pane. Elements are grouped by kind, and each row is one harness element:
 
 ```
 ☑ ecc:plan              plugin   plugin ecc (user)
@@ -34,6 +48,10 @@ claude --plugin-dir path/to/loadout
 - `Refresh` reads the harness again.
 
 Keys: Tab moves between controls, Enter presses, Esc returns to the prompt.
+
+## Desktop app
+
+In the Claude desktop app and the VS Code extension the pane is a GUI instead of the terminal text view: dropdowns for profile, project and scope, an On/Off button per element, one card per kind (click its header to open it), scope chips, clickable file origins, and Prev/Next paging. Each card and each plugin group has **All on** and **All off**, and **New profile** creates a profile from scratch with everything on or off. The terminal keeps the text view.
 
 ## What it manages
 
@@ -74,30 +92,30 @@ A profile starts with everything on or everything off, and remembers the element
 - `default`: your harness as it is.
 - `vanilla`: everything off, except permissions and settings. It is built in and cannot be changed, renamed or deleted. Duplicate it to build on it.
 
-To compose a setup from several harnesses, create a profile that starts with everything off and switch on the pieces you want:
+To compose a setup from several harnesses, create a profile that starts with everything off and switch on the pieces you want (in the desktop GUI: **New profile**, then **All on** per card or plugin group):
 
 ```
-/loadout new ecc-react off
+/meta-loadout new ecc-react off
 ```
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `/loadout` | Opens the pane |
-| `/loadout status` | Lists what is off in the active profile |
-| `/loadout list` | Lists the profiles |
-| `/loadout use <profile>` | Switches profile |
-| `/loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
-| `/loadout rename <profile> <new name>` | Renames a profile |
-| `/loadout delete <profile>` | Deletes a profile |
-| `/loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
+| `/meta-loadout` | Opens the pane |
+| `/meta-loadout status` | Lists what is off in the active profile |
+| `/meta-loadout list` | Lists the profiles |
+| `/meta-loadout use <profile>` | Switches profile |
+| `/meta-loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
+| `/meta-loadout rename <profile> <new name>` | Renames a profile |
+| `/meta-loadout delete <profile>` | Deletes a profile |
+| `/meta-loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
 
-Only you can change profiles. A `/loadout use` that you did not type is refused.
+Only you can change profiles. A `/meta-loadout use` that you did not type is refused.
 
 ## Safety
 
-- Before the first change to a settings file, loadout copies it to `<config dir>/loadout-backups/`.
+- Before the first change to a settings file, meta-loadout copies it to `<config dir>/meta-loadout-backups/`.
 - A removed entry is stored and restored only into the file it came from.
 - Setting values are never shown, only their keys.
 - Project settings behind a symbolic link are not written.
@@ -113,4 +131,4 @@ The engine does not allow `$` to cross an import, so every engine call is in `ho
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Original work (c) 2026 Mattia Carella; additions (c) 2026 sagwl96.
