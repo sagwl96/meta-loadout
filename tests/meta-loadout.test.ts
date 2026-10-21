@@ -1,5 +1,5 @@
 import type { On } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 const HOME = '/home/me'
@@ -101,11 +101,13 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
     ],
     ...Object.entries(world.files ?? {}),
   ])
-  const place = { root: ROOT }
+  const place = { root: ROOT, chat: 'chat-1' }
   const asked: string[] = []
   mock.store(on, world.store)
   mock.env(on, { HOME })
   on('session.root', () => ({ value: place.root }))
+  on('session.id', () => ({ value: place.chat }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
   on('settings.read', ($, e) => ({
     value: e.source === 'policy' ? (world.policy ?? {}) : {},
   }))
@@ -172,6 +174,9 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
     moveTo: (root: string) => {
       place.root = root
     },
+    openChat: (chat: string) => {
+      place.chat = chat
+    },
   }
 }
 
@@ -209,7 +214,7 @@ const startSession = ($: Engine) =>
 
 type MountedPane = Awaited<ReturnType<typeof mountPane>>
 
-const PROFILE_ACTIONS = ['apply', 'duplicate', 'rename', 'delete']
+const PROFILE_ACTIONS = ['apply', 'apply-project', 'apply-chat', 'duplicate', 'rename', 'delete']
 const MENU_BORDER_ROWS = 2
 const SKILL_TOGGLE = 'toggle:skill:ecc:plan'
 const PLUGIN_TOGGLE = `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:`
@@ -661,8 +666,8 @@ test('offers every action on default and no rename or delete on vanilla', async 
   await loadout($, 'status')
   const ui = await mountPane($)
 
-  expect(await actionsOf(ui, 'default')).toEqual(['apply', 'duplicate', 'rename', 'delete'])
-  expect(await actionsOf(ui, 'vanilla')).toEqual(['apply', 'duplicate'])
+  expect(await actionsOf(ui, 'default')).toEqual(PROFILE_ACTIONS)
+  expect(await actionsOf(ui, 'vanilla')).toEqual(['apply', 'apply-project', 'apply-chat', 'duplicate'])
   await ui.unmount()
 })
 
@@ -1554,4 +1559,152 @@ test('card All off with a query turns off only the matches', async ($, on) => {
   await ui.press({ key: 'section:skill' })
   expect((await ui.find({ key: 'toggle:skill:other' }))?.text).toBe('On')
   await ui.unmount()
+})
+
+const submitPrompt = ($: Engine) => $.prompt.submit({ text: 'hi' } as never)
+const PROJECT_DENY = { permissions: { deny: ['Bash(rm:*)'] } }
+
+describe('profiles per chat, project and globally', () => {
+  test('a chat profile gates only that chat and writes no settings file', async ($, on) => {
+    const files = harness(on)
+    const answer = await loadout($, 'use vanilla chat')
+    const inChat = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    files.openChat('chat-2')
+    await submitPrompt($)
+    const inOtherChat = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    files.openChat('chat-1')
+    await submitPrompt($)
+    const back = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    expect(answer.text).toBe('Profile "vanilla" is active in this chat.')
+    expect(inChat.deny).toContain('profile "vanilla"')
+    expect(inOtherChat.deny).toBeUndefined()
+    expect(back.deny).toContain('profile "vanilla"')
+    expect(files.userSettings()).toEqual(USER_SETTINGS)
+  })
+
+  test('a project profile rewrites the project settings and leaves the user settings alone', async ($, on) => {
+    const files = harness(on, USER_SETTINGS, {
+      files: { [PROJECT_SETTINGS_PATH]: JSON.stringify(PROJECT_DENY) },
+    })
+    await loadout($, 'new strict off')
+    await loadout($, 'use default')
+    await loadout($, 'use strict project')
+    await loadout($, 'project')
+
+    expect(files.userSettings()).toEqual(USER_SETTINGS)
+    expect(files.json(PROJECT_SETTINGS_PATH)).toEqual(PROJECT_DENY)
+    expect((await loadout($, 'status')).text).toContain(
+      'chat: (not set) · project: strict · global: default',
+    )
+  })
+
+  test('another project follows the global profile', async ($, on) => {
+    const files = harness(on)
+    await loadout($, 'use vanilla project')
+    const here = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    files.moveTo('/work/other')
+    await submitPrompt($)
+    const there = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    expect(here.deny).toContain('profile "vanilla"')
+    expect(there.deny).toBeUndefined()
+  })
+
+  test('a worktree of the project shares its project profile', async ($, on) => {
+    const files = harness(on)
+    await loadout($, 'use vanilla project')
+
+    files.moveTo(`${ROOT}/.claude/worktrees/fix-bug`)
+    files.openChat('chat-2')
+    await submitPrompt($)
+    const denied = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    expect(denied.deny).toContain('profile "vanilla"')
+  })
+
+  test('the chat profile wins over the project one, and unset falls back to it', async ($, on) => {
+    harness(on)
+    await loadout($, 'new mine on')
+    await loadout($, 'use default')
+    await loadout($, 'use vanilla project')
+    await loadout($, 'use mine chat')
+
+    const listed = await loadout($, 'list')
+    const unset = await loadout($, 'unset chat')
+    const denied = await $.tool.call({ tool: 'mcp__github__list' } as never)
+
+    expect(listed.text).toContain('* mine (0 overrides) [chat]')
+    expect(listed.text).toContain('  vanilla (0 overrides) [project]')
+    expect(listed.text).toContain('  default (0 overrides) [global]')
+    expect(unset.text).toBe(
+      'No profile is set in this chat now; this chat uses "vanilla", set for this project.',
+    )
+    expect(denied.deny).toContain('profile "vanilla"')
+  })
+
+  test('a global switch says when a chat profile still overrides it', async ($, on) => {
+    harness(on)
+    await loadout($, 'use vanilla chat')
+
+    const answer = await loadout($, 'use default global')
+
+    expect(answer.text).toContain('This chat still uses "vanilla", set in this chat.')
+  })
+
+  test('renaming and deleting a profile carry its chat binding along', async ($, on) => {
+    harness(on)
+    await loadout($, 'new temp off')
+    await loadout($, 'use default')
+    await loadout($, 'use temp chat')
+
+    await loadout($, 'rename temp later')
+    const renamed = await loadout($, 'list')
+    await loadout($, 'delete later')
+    const deleted = await loadout($, 'status')
+
+    expect(renamed.text).toContain('* later (0 overrides) [chat]')
+    expect(deleted.text).toStartWith('Profile "default": ')
+  })
+
+  test('refuses a level it does not know and unsetting the global profile', async ($, on) => {
+    harness(on)
+
+    expect((await loadout($, 'use vanilla everywhere')).text).toStartWith('Usage:')
+    expect((await loadout($, 'unset global')).text).toContain('cannot be unset')
+    expect((await loadout($, 'unset chat')).text).toBe('No profile is set in this chat.')
+  })
+
+  test('applies a profile to the chat from the pane and shows the level on the band', async ($, on) => {
+    harness(on)
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    const ui = await mountPane($)
+
+    await act(ui, 'vanilla', 'apply-chat')
+    const unset = await ui.find({ key: 'unset:chat' })
+    const band = await mountBand($, 'desktop')
+    const arrow = await band.find({ key: 'open-pane' })
+
+    expect(unset).toBeDefined()
+    expect(arrow?.text).toBe('↗ meta-loadout · vanilla (chat)')
+    await band.unmount()
+    await ui.unmount()
+  })
+
+  test('the desktop pane offers Apply to chat and Unset', async ($, on) => {
+    harness(on)
+    const ui = await mountPane($, 'desktop')
+
+    await ui.press({ key: 'action:apply-chat' })
+    const unset = await ui.find({ key: 'unset:chat' })
+    await ui.press({ key: 'unset:chat' })
+
+    expect(unset).toBeDefined()
+    expect(await ui.find({ key: 'unset:chat' })).toBeUndefined()
+    expect((await loadout($, 'status')).text).toStartWith('Profile "default": ')
+    await ui.unmount()
+  })
 })

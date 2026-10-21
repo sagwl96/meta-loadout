@@ -1,16 +1,20 @@
 import type { Elements } from 'claude-code'
 
 import type { Item, Kind, Profile, Scope } from '../types'
-import { KIND_LABELS, SCOPES, isFixedProfile } from './model'
+import { KIND_LABELS, LEVELS, SCOPES, isFixedProfile, levelOf } from './model'
 import { projectLabel } from './project'
 import {
   ACTION_KEY_PREFIX,
+  ACTION_LABELS,
   ALL,
   NAME_FIELDS,
   PICKER_KEY_PREFIX,
   PROFILE_KEY_PREFIX,
+  UNSET_KEY_PREFIX,
   actionsOf,
+  bindingLabel,
   clipEnd,
+  isUnsettable,
   fileLinkOf,
   linesOf,
   matchesQuery,
@@ -29,12 +33,6 @@ const KINDS_IN_GROUPS: readonly Kind[] = ['skill', 'agent', 'mcp']
 const STANDALONE = 'Standalone'
 const NAMESPACE_END = ':'
 const ROW_HOVER = { backgroundColor: 'subtle' } as const
-const ACTION_LABELS = {
-  apply: 'Apply',
-  duplicate: 'Duplicate',
-  rename: 'Rename',
-  delete: 'Delete',
-} as const
 const sourceOf = ({ name }: Item) =>
   name.includes(NAMESPACE_END) ? name.slice(0, name.indexOf(NAMESPACE_END)) : STANDALONE
 
@@ -47,7 +45,7 @@ const APPLIED_SUFFIX = ' (applied)'
 
 export const drawDesktopPane = (
   { Box, Text, Button, Input, Select, Link }: DesktopElements,
-  { items, root, projects, profiles, profile, applied, isOn, view }: PaneModel,
+  { items, root, projects, profiles, profile, applied, bindings, isOn, view }: PaneModel,
   actions: PaneActions,
 ) => {
   const query = view.query.trim()
@@ -241,8 +239,25 @@ export const drawDesktopPane = (
         <Box flexDirection="row" gap={2} alignItems="center">
           <Text bold>Meta Loadout</Text>
           <Text color="success">{` ${applied} `}</Text>
+          <Text dimColor>{levelOf(bindings)}</Text>
         </Box>
         <Button key="refresh" plain label="Refresh" onPress={actions.onRefresh} />
+      </Box>
+      <Box flexDirection="row" gap={3} alignItems="center" flexWrap="wrap">
+        {LEVELS.map(level => (
+          <Box key={`binding:${level}`} flexDirection="row" gap={1} alignItems="center">
+            <Text dimColor>{`${level[0]?.toUpperCase()}${level.slice(1)}`}</Text>
+            <Text backgroundColor="subtle">{` ${bindingLabel(bindings, level)} `}</Text>
+            {isUnsettable(bindings, level) && (
+              <Button
+                key={`${UNSET_KEY_PREFIX}${level}`}
+                plain
+                label="Unset"
+                onPress={() => actions.onUnset(level)}
+              />
+            )}
+          </Box>
+        ))}
       </Box>
       <Box flexDirection="row" gap={2} alignItems="flex-end" flexWrap="wrap">
         <Input
@@ -300,7 +315,7 @@ export const drawDesktopPane = (
           <Button
             key={`${ACTION_KEY_PREFIX}${action}`}
             label={ACTION_LABELS[action]}
-            variant={action === 'apply' ? 'primary' : 'secondary'}
+            variant={action === 'apply-chat' ? 'primary' : 'secondary'}
             onPress={() => actions.onAction(profile.name, action)}
           />,
         ])}

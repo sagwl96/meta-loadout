@@ -1,4 +1,4 @@
-import type { Item, Kind, Ledger, Profile, Scope } from '../types'
+import type { Bindings, Item, Kind, Ledger, Level, Profile, Scope, WritableSource } from '../types'
 
 export const PLUGIN = 'meta-loadout'
 export const DEFAULT_PROFILE_NAME = 'default'
@@ -157,3 +157,70 @@ export const restoredProfiles = (
     active: isNamed(carried) ? carried : fallbackProfile(profiles).name,
   }
 }
+
+export const LEVELS: readonly Level[] = ['chat', 'project', 'global']
+export const UNBOUND = ''
+const MAX_BINDINGS = 500
+const WORKTREE_FOLDER = /\/\.claude\/worktrees\/[^/]+$/
+
+export const projectKeyOf = (root: string) => root.replace(WORKTREE_FOLDER, '')
+
+export const levelOf = (bindings: Bindings): Level =>
+  LEVELS.find(level => bindings[level] !== UNBOUND) ?? 'global'
+
+export const effectiveName = (bindings: Bindings) => bindings[levelOf(bindings)]
+
+export const governingName = (bindings: Bindings, source: WritableSource) =>
+  source === 'user' || bindings.project === UNBOUND ? bindings.global : bindings.project
+
+export const appliedNameFor = (bindings: Bindings, item: Item) =>
+  item.entry === undefined
+    ? effectiveName(bindings)
+    : governingName(bindings, item.entry.source)
+
+export const knownBindings = (
+  profiles: readonly Profile[],
+  bindings: Bindings,
+): Bindings => {
+  const isNamed = (name: string) => profiles.some(profile => profile.name === name)
+
+  return {
+    chat: isNamed(bindings.chat) ? bindings.chat : UNBOUND,
+    project: isNamed(bindings.project) ? bindings.project : UNBOUND,
+    global: isNamed(bindings.global) ? bindings.global : fallbackProfile(profiles).name,
+  }
+}
+
+export const bindingMapOf = (stored: unknown): Record<string, string> =>
+  typeof stored === 'object' && stored !== null && !Array.isArray(stored)
+    ? Object.fromEntries(
+        Object.entries(stored).filter(
+          (pair): pair is [string, string] =>
+            typeof pair[1] === 'string' && isValidProfileName(pair[1]),
+        ),
+      )
+    : {}
+
+export const withBinding = (
+  map: Readonly<Record<string, string>>,
+  key: string,
+  name: string,
+): Record<string, string> => {
+  const others = Object.entries(map).filter(([one]) => one !== key)
+  const kept = name === UNBOUND ? others : [...others, [key, name] as [string, string]]
+
+  return Object.fromEntries(kept.slice(-MAX_BINDINGS))
+}
+
+export const renamedInMap = (
+  map: Readonly<Record<string, string>>,
+  from: string,
+  to: string,
+): Record<string, string> =>
+  Object.fromEntries(Object.entries(map).map(([key, name]) => [key, name === from ? to : name]))
+
+export const withoutName = (
+  map: Readonly<Record<string, string>>,
+  name: string,
+): Record<string, string> =>
+  Object.fromEntries(Object.entries(map).filter(([, one]) => one !== name))

@@ -7,6 +7,7 @@ Based on [loadout](https://github.com/MK27MK/loadout) by Mattia Carella (MIT). m
 - a desktop / VS Code GUI pane (`hooks/desktopView.tsx`)
 - **All on / All off** per card (kind) and per plugin group
 - **New profile** from scratch, with everything on or everything off
+- a profile **per chat, per project, or globally**
 
 ![The meta-loadout desktop pane](assets/desktop-pane.png)
 
@@ -92,6 +93,26 @@ A profile starts with everything on or everything off, and remembers the element
 - `default`: your harness as it is.
 - `vanilla`: everything off, except permissions and settings. It is built in and cannot be changed, renamed or deleted. Duplicate it to build on it.
 
+### Per chat, per project, or globally
+
+A profile can be applied at three levels. The most specific one that is set wins:
+
+| Level | Applies to | Set with |
+|---|---|---|
+| `chat` | This chat only (kept when you resume it; a `/clear` starts a new chat) | `/meta-loadout use <profile> chat`, or **Apply to chat** |
+| `project` | Every chat in the session's project folder, its `.claude/worktrees/*` included | `/meta-loadout use <profile> project`, or **Apply to project** |
+| `global` | Everything else | `/meta-loadout use <profile>`, or **Apply globally** |
+
+`/meta-loadout unset chat` or `unset project` (or **Unset** in the pane) removes a level, so the next one down takes over. The pane header shows what each level is set to, and the band says `(chat)` or `(project)` when one of those is in effect.
+
+Settings files are shared, so each one follows the level that owns it:
+
+- Context files, skills, agents, MCP servers and hook events follow the profile in effect for the chat.
+- Entries in the project's `.claude/settings.json` and `settings.local.json` follow the project profile, or the global one when no project profile is set.
+- Entries in `~/.claude/settings.json` (plugins, permissions, settings and hooks there) always follow the global profile.
+
+A chat profile never writes a file, and two chats open in the same project can use different chat profiles without interfering. When a profile is in effect for a chat but does not own a settings file, its rows for that file show what the profile would set, and toggling them only updates the profile.
+
 To compose a setup from several harnesses, create a profile that starts with everything off and switch on the pieces you want (in the desktop GUI: **New profile**, then **All on** per card or plugin group):
 
 ```
@@ -105,7 +126,8 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout` | Opens the pane |
 | `/meta-loadout status` | Lists what is off in the active profile |
 | `/meta-loadout list` | Lists the profiles |
-| `/meta-loadout use <profile>` | Switches profile |
+| `/meta-loadout use <profile> [chat\|project\|global]` | Switches profile, globally unless a level is given |
+| `/meta-loadout unset <chat\|project>` | Removes the chat or project profile |
 | `/meta-loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
 | `/meta-loadout rename <profile> <new name>` | Renames a profile |
 | `/meta-loadout delete <profile>` | Deletes a profile |

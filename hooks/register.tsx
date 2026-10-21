@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptOrigin, Register } from 'claude-code'
 
-import type { Item, Kind, Ledger, Profile, ProfileAction, View } from '../types'
+import type { Bindings, Item, Kind, Ledger, Level, Profile, ProfileAction, View } from '../types'
 import {
   backupPathOf,
   ledgerAfter,
@@ -30,8 +30,13 @@ import {
   DEFAULT_PROFILE_NAME,
   EMPTY_LEDGER,
   INITIAL_PROFILES,
+  LEVELS,
   PLUGIN,
+  UNBOUND,
+  appliedNameFor,
+  bindingMapOf,
   desiredState,
+  effectiveName,
   fallbackProfile,
   findProfile,
   isEnabled,
@@ -39,12 +44,18 @@ import {
   isOnIn,
   isShownOn,
   isValidProfileName,
+  knownBindings,
+  levelOf,
   nameProblem,
+  projectKeyOf,
   removeProfile,
   renameProfile,
+  renamedInMap,
   restoredProfiles,
   upsertProfile,
+  withBinding,
   withOverride,
+  withoutName,
 } from './model'
 import {
   fileItems,
@@ -71,6 +82,10 @@ const CORE_TIER = 'core'
 const PROFILES_KEY = 'profiles'
 const ACTIVE_KEY = 'active'
 const LEDGER_KEY = 'ledger'
+const BINDING_KEYS: Readonly<Record<Exclude<Level, 'global'>, string>> = {
+  chat: 'chatProfiles',
+  project: 'projectProfiles',
+}
 const WRITABLE_SOURCES = ['user', 'project', 'local'] as const
 const LOCKED_SOURCES = [
   { source: 'policy', origin: 'managed settings' },
@@ -79,7 +94,18 @@ const LOCKED_SOURCES = [
 const READ_ONLY_VERBS = ['', 'list', 'status']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const USAGE =
-  'Usage: /meta-loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
+  'Usage: /meta-loadout [list | status | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
+const LEVEL_PHRASES: Readonly<Record<Level, string>> = {
+  chat: 'in this chat',
+  project: 'for this project',
+  global: 'everywhere',
+}
+const APPLY_LEVELS: Readonly<Partial<Record<ProfileAction, Level>>> = {
+  apply: 'global',
+  'apply-project': 'project',
+  'apply-chat': 'chat',
+}
+const isLevel = (word: string): word is Level => (LEVELS as readonly string[]).includes(word)
 const NO_ITEMS: Item[] = []
 const NO_PROJECTS: string[] = []
 const MAX_RULES_DEPTH = 4
@@ -107,6 +133,8 @@ const FIRST_NAME_OPTIONS = {
 
 const profilesAtom = atom({ plugin: 'meta-loadout', key: 'profiles' } as const, STARTING_PROFILES)
 const activeAtom = atom({ plugin: 'meta-loadout', key: 'active' } as const, DEFAULT_PROFILE_NAME)
+const chatAtom = atom({ plugin: 'meta-loadout', key: 'chatProfile' } as const, UNBOUND)
+const projectAtom = atom({ plugin: 'meta-loadout', key: 'projectProfile' } as const, UNBOUND)
 const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
 const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
@@ -175,21 +203,38 @@ const loadLedger = async ($: EngineInterface): Promise<Ledger> => {
   }
 }
 
+const bindingKeys = async ($: EngineInterface) => ({
+  chat: await $.session.id(),
+  project: projectKeyOf(await $.session.root()),
+})
+
+const storedMap = async ($: EngineInterface, level: Exclude<Level, 'global'>) =>
+  bindingMapOf(await $.store.get(BINDING_KEYS[level]))
+
 const storedProfiles = async ($: EngineInterface) => {
   const stored = await $.store.get(PROFILES_KEY)
   const isFirstRun = stored === undefined
   const kept = Array.isArray(stored) ? stored.filter(isProfile) : []
+  const { profiles, active } = restoredProfiles(
+    isFirstRun ? undefined : kept,
+    await $.store.get(ACTIVE_KEY),
+  )
+  const keys = await bindingKeys($)
+  const bindings = knownBindings(profiles, {
+    chat: (await storedMap($, 'chat'))[keys.chat] ?? UNBOUND,
+    project: (await storedMap($, 'project'))[keys.project] ?? UNBOUND,
+    global: active,
+  })
 
-  return {
-    isFirstRun,
-    ...restoredProfiles(isFirstRun ? undefined : kept, await $.store.get(ACTIVE_KEY)),
-  }
+  return { isFirstRun, profiles, ...bindings, active: bindings.global }
 }
 
 const profilesNow = async ($: EngineInterface) => {
   const held = {
     profiles: await read($, profilesAtom),
     active: await read($, activeAtom),
+    chat: await read($, chatAtom),
+    project: await read($, projectAtom),
   }
 
   return (await read($, loadedAtom)) ? held : storedProfiles($)
@@ -197,12 +242,22 @@ const profilesNow = async ($: EngineInterface) => {
 
 const profilesOf = async ($: EngineInterface) => (await profilesNow($)).profiles
 
-const activeNameOf = async ($: EngineInterface) => (await profilesNow($)).active
+const bindingsNow = async ($: EngineInterface): Promise<Bindings> => {
+  const { active, chat, project } = await profilesNow($)
+
+  return { chat, project, global: active }
+}
 
 const activeProfile = async ($: EngineInterface) => {
-  const { profiles, active } = await profilesNow($)
+  const { profiles, active, chat, project } = await profilesNow($)
 
-  return findProfile(profiles, active)
+  return findProfile(profiles, effectiveName({ chat, project, global: active }))
+}
+
+const holdBindings = async ($: EngineInterface, bindings: Bindings) => {
+  await update($, activeAtom, () => bindings.global)
+  await update($, chatAtom, () => bindings.chat)
+  await update($, projectAtom, () => bindings.project)
 }
 
 const shownProfile = async ($: EngineInterface) => {
@@ -427,9 +482,9 @@ const showProject = async ($: EngineInterface, typed: string) => {
 }
 
 const load = async ($: EngineInterface) => {
-  const { isFirstRun, profiles, active } = await storedProfiles($)
+  const { isFirstRun, profiles, active, chat, project } = await storedProfiles($)
   await update($, profilesAtom, () => profiles)
-  await update($, activeAtom, () => active)
+  await holdBindings($, { chat, project, global: active })
   if (isFirstRun) await $.store.set(PROFILES_KEY, profiles)
   $.ui.status(undefined)
 
@@ -454,6 +509,13 @@ const loadOnce = ($: EngineInterface) => {
 
 const ensureLoaded = async ($: EngineInterface) => {
   if (!(await read($, loadedAtom))) await loadOnce($)
+}
+
+const syncBindings = async ($: EngineInterface) => {
+  const before = effectiveName(await bindingsNow($))
+  const { active, chat, project } = await storedProfiles($)
+  await holdBindings($, { chat, project, global: active })
+  if (effectiveName({ chat, project, global: active }) !== before) invalidateGates($)
 }
 
 const inTurn = <Result,>(
@@ -499,12 +561,14 @@ const change = async (
   items: readonly Item[],
   target: (current: boolean) => boolean,
 ) => {
-  const isApplied = profile.name === (await activeProfile($)).name
+  const bindings = await bindingsNow($)
   const ledger = await loadLedger($)
   const changed: Item[] = []
+  const written: Item[] = []
   const errors: { item: Item; message: string }[] = []
   let next = profile
   for (const item of items) {
+    const isApplied = profile.name === appliedNameFor(bindings, item)
     const current = isOnIn(profile, item, ledger, isApplied)
     const isOn = target(current)
     if (isOn === current) continue
@@ -512,6 +576,7 @@ const change = async (
       if (isApplied) await setPersisted($, item, isOn)
       next = withOverride(next, item.id, isOn)
       changed.push(item)
+      if (isApplied) written.push(item)
     } catch (error) {
       errors.push({ item, message: messageOf(error) })
     }
@@ -521,7 +586,7 @@ const change = async (
   await refresh($)
   if (changed.length > 0) invalidateGates($)
   const hint =
-    isApplied && changed.some(item => item.kind === 'plugin')
+    written.some(item => item.kind === 'plugin')
       ? ' Run /reload-plugins to apply.'
       : ''
 
@@ -576,11 +641,14 @@ const setMany = async ($: EngineInterface, ids: readonly string[], isOn: boolean
   return say($, `${done}${failures}`)
 }
 
-const reconcile = async ($: EngineInterface, profile: Profile) => {
+const reconcile = async ($: EngineInterface, bindings: Bindings) => {
   const ledger = await loadLedger($)
+  const profiles = await profilesOf($)
   const pending = (await refresh($)).filter(
     item =>
-      item.entry !== undefined && desiredState(profile, item, ledger) !== item.isOn,
+      item.entry !== undefined &&
+      desiredState(findProfile(profiles, appliedNameFor(bindings, item)), item, ledger) !==
+        item.isOn,
   )
   const outcome = await pending.reduce(
     async (before, item) => {
@@ -600,27 +668,71 @@ const reconcile = async ($: EngineInterface, profile: Profile) => {
   return outcome
 }
 
-const activate = async ($: EngineInterface, profile: Profile) => {
-  const outcome = await reconcile($, profile)
-  await update($, activeAtom, () => profile.name)
-  await $.store.set(ACTIVE_KEY, profile.name)
-  await setView($, { viewed: profile.name })
+const persistBindings = async ($: EngineInterface, bindings: Bindings) => {
+  const before = await bindingsNow($)
+  const keys = await bindingKeys($)
+  if (bindings.global !== before.global) await $.store.set(ACTIVE_KEY, bindings.global)
+  for (const level of ['chat', 'project'] as const)
+    if (bindings[level] !== before[level])
+      await $.store.set(
+        BINDING_KEYS[level],
+        withBinding(await storedMap($, level), keys[level], bindings[level]),
+      )
+  await holdBindings($, bindings)
+}
+
+const activate = async ($: EngineInterface, bindings: Bindings) => {
+  const outcome = await reconcile($, bindings)
+  await persistBindings($, bindings)
+  await setView($, { viewed: effectiveName(bindings) })
   invalidateGates($)
 
   return outcome
 }
 
-const switchProfile = async ($: EngineInterface, name: string) => {
-  const profile = (await profilesOf($)).find(one => one.name === name)
-  if (profile === undefined) return say($, `No profile is named "${name}".`)
-  const { changed, errors } = await activate($, profile)
+const outcomeNote = ({ changed, errors }: { changed: number; errors: string[] }) => {
   const failures = errors.length === 0 ? '' : ` Failed: ${errors.join('; ')}.`
   const written =
     changed === 0
       ? ''
       : ` ${changed} settings entries rewritten; run /reload-plugins if plugins changed.`
 
-  return say($, `Profile "${name}" is active.${written}${failures}`)
+  return `${written}${failures}`
+}
+
+const shadowNote = (bindings: Bindings, level: Level) => {
+  const above = levelOf(bindings)
+  if (LEVELS.indexOf(above) >= LEVELS.indexOf(level)) return ''
+
+  return ` This chat still uses "${bindings[above]}", set ${LEVEL_PHRASES[above]}.`
+}
+
+const switchProfile = async ($: EngineInterface, name: string, level: Level = 'global') => {
+  const profile = (await profilesOf($)).find(one => one.name === name)
+  if (profile === undefined) return say($, `No profile is named "${name}".`)
+  const bindings = { ...(await bindingsNow($)), [level]: name }
+  const outcome = await activate($, bindings)
+  const where = level === 'global' ? '' : ` ${LEVEL_PHRASES[level]}`
+
+  return say(
+    $,
+    `Profile "${name}" is active${where}.${outcomeNote(outcome)}${shadowNote(bindings, level)}`,
+  )
+}
+
+const unsetProfile = async ($: EngineInterface, level: Level) => {
+  if (level === 'global')
+    return say($, 'The global profile cannot be unset; use another one instead.')
+  const before = await bindingsNow($)
+  if (before[level] === UNBOUND) return say($, `No profile is set ${LEVEL_PHRASES[level]}.`)
+  const bindings = { ...before, [level]: UNBOUND }
+  const outcome = await activate($, bindings)
+  const now = levelOf(bindings)
+
+  return say(
+    $,
+    `No profile is set ${LEVEL_PHRASES[level]} now; this chat uses "${bindings[now]}", set ${LEVEL_PHRASES[now]}.${outcomeNote(outcome)}`,
+  )
 }
 
 const addProfile = async ($: EngineInterface, created: Profile) => {
@@ -629,7 +741,7 @@ const addProfile = async ($: EngineInterface, created: Profile) => {
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, [...profiles, created])
 
-  return switchProfile($, created.name)
+  return switchProfile($, created.name, levelOf(await bindingsNow($)))
 }
 
 const duplicateProfile = async ($: EngineInterface, from: string, name: string) => {
@@ -658,10 +770,15 @@ const renameTo = async ($: EngineInterface, from: string, to: string) => {
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, renameProfile(profiles, from, to))
   await forgetProfile($, from, to)
-  if ((await activeNameOf($)) === from) {
-    await update($, activeAtom, () => to)
-    await $.store.set(ACTIVE_KEY, to)
-  }
+  for (const level of ['chat', 'project'] as const)
+    await $.store.set(BINDING_KEYS[level], renamedInMap(await storedMap($, level), from, to))
+  const bindings = await bindingsNow($)
+  if (bindings.global === from) await $.store.set(ACTIVE_KEY, to)
+  await holdBindings($, {
+    chat: bindings.chat === from ? to : bindings.chat,
+    project: bindings.project === from ? to : bindings.project,
+    global: bindings.global === from ? to : bindings.global,
+  })
 
   return say($, `Profile "${from}" is now "${to}".`)
 }
@@ -688,11 +805,18 @@ const deleteProfile = async ($: EngineInterface, name: string) => {
   if (!profiles.some(profile => profile.name === name))
     return say($, `No profile is named "${name}".`)
   const kept = removeProfile(profiles, name)
-  if ((await activeNameOf($)) === name) {
-    const { errors } = await activate($, fallbackProfile(kept))
+  const bindings = await bindingsNow($)
+  if (Object.values(bindings).includes(name)) {
+    const { errors } = await activate($, {
+      chat: bindings.chat === name ? UNBOUND : bindings.chat,
+      project: bindings.project === name ? UNBOUND : bindings.project,
+      global: bindings.global === name ? fallbackProfile(kept).name : bindings.global,
+    })
     if (errors.length > 0)
       return say($, `Profile "${name}" was kept; leaving it failed: ${errors.join('; ')}.`)
   }
+  for (const level of ['chat', 'project'] as const)
+    await $.store.set(BINDING_KEYS[level], withoutName(await storedMap($, level), name))
   await saveProfiles($, kept)
   await forgetProfile($, name)
 
@@ -715,8 +839,11 @@ const runProfileAction = async (
 
     return name
   }
-  if (action === 'apply') await setView($, { edit: 'none' })
-  const said = await (action === 'apply' ? switchProfile($, name) : deleteProfile($, name))
+  const level = APPLY_LEVELS[action]
+  if (level !== undefined) await setView($, { edit: 'none' })
+  const said = await (level !== undefined
+    ? switchProfile($, name, level)
+    : deleteProfile($, name))
   await focusShown($)
 
   return said
@@ -762,24 +889,40 @@ const openPane = async ($: EngineInterface) => {
   return 'Meta Loadout pane opened.'
 }
 
+const bindingTags = (bindings: Bindings, name: string) =>
+  levelOf(bindings) === 'global'
+    ? ''
+    : LEVELS.filter(level => bindings[level] === name)
+        .map(level => ` [${level}]`)
+        .join('')
+
 const listProfiles = async ($: EngineInterface) => {
   const active = await activeProfile($)
+  const bindings = await bindingsNow($)
 
   return (await profilesOf($))
     .map(
       profile =>
-        `${profile.name === active.name ? '*' : ' '} ${profile.name} (${Object.keys(profile.overrides).length} overrides)`,
+        `${profile.name === active.name ? '*' : ' '} ${profile.name} (${Object.keys(profile.overrides).length} overrides)${bindingTags(bindings, profile.name)}`,
     )
     .join('\n')
 }
+
+const bindingsLine = (bindings: Bindings) =>
+  LEVELS.map(
+    level => `${level}: ${bindings[level] === UNBOUND ? '(not set)' : bindings[level]}`,
+  ).join(' · ')
 
 const status = async ($: EngineInterface) => {
   const profile = await activeProfile($)
   const items = await refresh($)
   const off = items.filter(item => !isShownOn(profile, item))
+  const bindings = await bindingsNow($)
+  const level = levelOf(bindings)
 
   return [
-    `Profile "${profile.name}": ${off.length} of ${items.length} harness elements off.`,
+    `Profile "${profile.name}"${level === 'global' ? '' : ` (${level})`}: ${off.length} of ${items.length} harness elements off.`,
+    ...(level === 'global' ? [] : [`  ${bindingsLine(bindings)}`]),
     ...off.map(item => `  off  ${item.kind}  ${item.name}  [${item.scope}]`),
   ].join('\n')
 }
@@ -793,7 +936,9 @@ const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin
   if (verb === 'list') return listProfiles($)
   if (verb === 'status') return status($)
   if (verb === 'project') return showProject($, name)
-  if (verb === 'use' && name !== '') return inTurn($, () => switchProfile($, name))
+  if (verb === 'use' && name !== '' && (option === '' || isLevel(option)))
+    return inTurn($, () => switchProfile($, name, option === '' ? 'global' : option))
+  if (verb === 'unset' && isLevel(name)) return inTurn($, () => unsetProfile($, name))
   if (verb === 'delete' && name !== '') return inTurn($, () => deleteProfile($, name))
   if (verb === 'rename' && name !== '' && option !== '')
     return inTurn($, () => renameTo($, name, option))
@@ -811,7 +956,7 @@ export const register: Register = on => {
       name: 'meta-loadout',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
       argumentHint:
-        '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | project [<folder>]]',
+        '[list | status | use <profile> [chat|project|global] | unset <chat|project> | new <profile> | rename <profile> <new name> | delete <profile> | project [<folder>]]',
     })
     try {
       const isFirstRun = await loadOnce($)
@@ -839,6 +984,7 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     try {
       await ensureLoaded($)
+      await syncBindings($)
       await refresh($)
     } catch (error) {
       $.ui.log(`meta-loadout could not refresh the harness: ${messageOf(error)}`)
@@ -1029,7 +1175,11 @@ export const register: Register = on => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop' && e.surface !== 'vscode')
       return next(e)
 
-    return drawBand($.ui.resolve(e), (await activeProfile($)).name, () =>
+    const bindings = await bindingsNow($)
+    const level = levelOf(bindings)
+    const label = `${(await activeProfile($)).name}${level === 'global' ? '' : ` (${level})`}`
+
+    return drawBand($.ui.resolve(e), label, () =>
       void openPane($).catch(error =>
         $.ui.toast(`meta-loadout could not open its pane: ${messageOf(error)}`),
       ),
@@ -1043,9 +1193,9 @@ export const register: Register = on => {
 
     const view = await read($, viewAtom)
     const applied = (await activeProfile($)).name
+    const bindings = await bindingsNow($)
     const profile = await shownProfile($)
-    const isApplied = profile.name === applied
-    const ledger = isApplied ? EMPTY_LEDGER : await loadLedger($)
+    const ledger = await loadLedger($)
 
     const model: PaneModel = {
       items: await shownItems($),
@@ -1054,7 +1204,9 @@ export const register: Register = on => {
       profiles: await profilesOf($),
       profile,
       applied,
-      isOn: item => isOnIn(profile, item, ledger, isApplied),
+      bindings,
+      isOn: item =>
+        isOnIn(profile, item, ledger, profile.name === appliedNameFor(bindings, item)),
       view,
       columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
       rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
@@ -1083,6 +1235,7 @@ export const register: Register = on => {
           .then(() => setView($, { notice: 'Refreshed.' }))
           .catch(report),
       onProject: path => void showProject($, path).catch(report),
+      onUnset: level => void inTurn($, () => unsetProfile($, level)).catch(report),
       onView: patch => void setView($, patch).catch(report),
     }
 

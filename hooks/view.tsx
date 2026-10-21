@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
-import type { Item, Kind, Picker, Profile, ProfileAction, Scope, View } from '../types'
-import { KINDS, KIND_LABELS, SCOPES, isFixedProfile } from './model'
+import type { Bindings, Item, Kind, Level, Picker, Profile, ProfileAction, Scope, View } from '../types'
+import { KINDS, KIND_LABELS, LEVELS, SCOPES, UNBOUND, isFixedProfile } from './model'
 import { projectLabel } from './project'
 
 export type PaneElements = Pick<
@@ -18,6 +18,7 @@ export type PaneActions = {
   onCreateNew: (name: string, base: 'on' | 'off') => void
   onRefresh: () => void
   onProject: (path: string) => void
+  onUnset: (level: Level) => void
   onView: (patch: Partial<View>) => void
 }
 
@@ -28,6 +29,7 @@ export type PaneModel = {
   profiles: readonly Profile[]
   profile: Profile
   applied: string
+  bindings: Bindings
   isOn: (item: Item) => boolean
   view: View
   columns: number
@@ -68,8 +70,30 @@ const APPLIED_COLOR = 'suggestion'
 const MENU_BORDER_ROWS = 2
 const ORIGIN_NOTE = / (\(@import from .*\)|or commands)$/
 const FILE_SCHEME = 'file://'
-const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
-const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
+const APPLY_ACTIONS: readonly ProfileAction[] = ['apply', 'apply-project', 'apply-chat']
+const PROFILE_ACTIONS: readonly ProfileAction[] = [
+  ...APPLY_ACTIONS,
+  'duplicate',
+  'rename',
+  'delete',
+]
+const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = [...APPLY_ACTIONS, 'duplicate']
+export const ACTION_LABELS: Readonly<Record<ProfileAction, string>> = {
+  apply: 'Apply globally',
+  'apply-project': 'Apply to project',
+  'apply-chat': 'Apply to chat',
+  duplicate: 'Duplicate',
+  rename: 'Rename',
+  delete: 'Delete',
+}
+export const UNSET_KEY_PREFIX = 'unset:'
+const NOT_SET = '—'
+
+export const bindingLabel = (bindings: Bindings, level: Level) =>
+  bindings[level] === UNBOUND ? NOT_SET : bindings[level]
+
+export const isUnsettable = (bindings: Bindings, level: Level) =>
+  level !== 'global' && bindings[level] !== UNBOUND
 export const NAME_FIELDS = {
   new: { key: 'new-profile-name', verb: 'Duplicate', submitLabel: 'create' },
   rename: { key: 'rename-profile-name', verb: 'Rename', submitLabel: 'rename' },
@@ -161,6 +185,7 @@ export const drawPane = (
     profiles,
     profile,
     applied,
+    bindings,
     isOn,
     view,
     columns,
@@ -353,7 +378,7 @@ export const drawPane = (
               <Button
                 key={`${ACTION_KEY_PREFIX}${action}`}
                 plain
-                label={action}
+                label={ACTION_LABELS[action]}
                 onPress={() => actions.onAction(one.name, action)}
               />
             ))}
@@ -363,6 +388,28 @@ export const drawPane = (
     )
   }
 
+  const drawBindings = () => (
+    <Box flexDirection="row" gap={2}>
+      {LEVELS.map(level => (
+        <Box key={`binding:${level}`} flexDirection="row" gap={1}>
+          <Text dimColor>{level}</Text>
+          <Text color={applied === bindings[level] ? APPLIED_COLOR : undefined}>
+            {bindingLabel(bindings, level)}
+          </Text>
+          {isUnsettable(bindings, level) && (
+            <Button
+              key={`${UNSET_KEY_PREFIX}${level}`}
+              plain
+              dimColor
+              label="unset"
+              onPress={() => actions.onUnset(level)}
+            />
+          )}
+        </Box>
+      ))}
+    </Box>
+  )
+
   return (
     <Box flexDirection="column" {...(isDocked ? { minHeight: rows } : {})}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -371,6 +418,7 @@ export const drawPane = (
             Meta Loadout
           </Text>
           <Text dimColor>{profile.name}</Text>
+          {drawBindings()}
         </Box>
         <Box key="refresh-frame" {...FRAME}>
           <Button key="refresh" plain dimColor label="Refresh" onPress={actions.onRefresh} />

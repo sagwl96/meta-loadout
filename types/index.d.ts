@@ -61,7 +61,17 @@ export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename' | 'create-on' | 'cr
 
 export type Picker = 'none' | 'project' | 'scope'
 
-export type ProfileAction = 'apply' | 'duplicate' | 'rename' | 'delete'
+export type ProfileAction =
+  | 'apply'
+  | 'apply-project'
+  | 'apply-chat'
+  | 'duplicate'
+  | 'rename'
+  | 'delete'
+
+export type Level = 'chat' | 'project' | 'global'
+
+export type Bindings = Record<Level, string>
 
 export type View = {
   open: Kind[]
@@ -88,6 +98,8 @@ declare module 'claude-code' {
     'meta-loadout': {
       profiles: Profile[]
       active: string
+      chatProfile: string
+      projectProfile: string
       isLoaded: boolean
       seen: Item[]
       items: Item[]
