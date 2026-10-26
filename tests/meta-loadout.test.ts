@@ -1885,3 +1885,14 @@ describe('desktop type scale', () => {
     expect(props?.size).toBeUndefined()
   })
 })
+
+test('draws each count as a bar with its words in a tooltip', async ($, on) => {
+  harness(on)
+  await loadout($, 'set default ecc:plan off')
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'section:skill' })
+
+  expect(await ui.find({ type: 'Text', text: /^0 of 1 on$/ })).toBeDefined()
+  expect(await ui.find({ key: 'count:skill' })).toBeDefined()
+  await ui.unmount()
+})

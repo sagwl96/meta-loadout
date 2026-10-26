@@ -54,7 +54,10 @@ const LEVEL_HINTS = {
   global: 'Everywhere else',
 } as const
 const LOCK_ICONS = { locked: '🔒', unlocked: '🔓' } as const
-const REFRESH_ICON = '↻'
+// Both emoji, so they draw at one size; each sits in a slot of one width.
+const REFRESH_ICON = '🔄'
+const ICON_SLOT = 6
+const BAR_WIDTH = 18
 type TextSize = 'caption' | 'footnote' | 'body' | 'heading' | 'title'
 type TextWeight = 'regular' | 'medium' | 'semibold' | 'bold'
 // Engines before the type scale refuse `size` and `weight` and draw no pane,
@@ -121,10 +124,10 @@ export const drawDesktopPane = (
     </Box>
   )
 
-  // An icon-only button whose words show beside it while the pointer is on it.
-  const iconButton = (key: string, icon: string, tip: string, onPress: () => void) => (
+  // Shows `tip` below `child` while the pointer is on it.
+  const withTip = (key: string, tip: string, child: JSX.Element) => (
     <Box key={`tip:${key}`} position="relative">
-      <Button key={key} variant="secondary" label={icon} onPress={onPress} />
+      {child}
       <Box
         position="absolute"
         top={3}
@@ -140,6 +143,29 @@ export const drawDesktopPane = (
       </Box>
     </Box>
   )
+
+  const iconButton = (key: string, icon: string, tip: string, onPress: () => void) =>
+    withTip(
+      key,
+      tip,
+      <Box width={ICON_SLOT} justifyContent="center">
+        <Button key={key} variant="secondary" label={icon} onPress={onPress} />
+      </Box>,
+    )
+
+  // How many are on, as a bar of one width everywhere; the words show on hover.
+  const progress = (key: string, onCount: number, total: number) =>
+    withTip(
+      key,
+      `${onCount} of ${total} on`,
+      <Box key={key} {...CHIP} paddingX={0} width={BAR_WIDTH} borderColor="promptBorder">
+        <Box
+          height={1}
+          width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
+          backgroundColor={ACCENT}
+        />
+      </Box>,
+    )
 
   const title = (label: string, hint?: string) => (
     <Box flexDirection="column">
@@ -220,7 +246,7 @@ export const drawDesktopPane = (
         }
       />
       <Box flexDirection="row" gap={2} alignItems="center">
-        {chip(`count:${kind}`, `${count - offCount} of ${count} on`, offCount < count ? ACCENT : undefined)}
+        {progress(`count:${kind}`, count - offCount, count)}
         {isOpen && drawBulk(kind, inScope(kind))}
       </Box>
     </Box>
@@ -293,9 +319,7 @@ export const drawDesktopPane = (
           >
             <Text {...type(undefined, 'semibold')}>{source}</Text>
             <Box flexDirection="row" gap={2} alignItems="center">
-              <Text {...type('footnote')} dimColor>
-                {`${onCount} of ${among.length} on`}
-              </Text>
+              {progress(`count:${kind}:${source}`, onCount, among.length)}
               {among.length > 1 && drawBulk(`${kind}:${source}`, among)}
             </Box>
           </Box>
