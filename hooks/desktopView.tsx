@@ -144,12 +144,18 @@ export const drawDesktopPane = (
     </Box>
   )
 
-  const iconButton = (key: string, icon: string, tip: string, onPress: () => void) =>
+  const iconButton = (
+    key: string,
+    icon: string,
+    tip: string,
+    onPress: () => void,
+    isLit = false,
+  ) =>
     withTip(
       key,
       tip,
       <Box width={ICON_SLOT} justifyContent="center">
-        <Button key={key} variant="secondary" label={icon} onPress={onPress} />
+        <Button key={key} variant={isLit ? 'primary' : 'secondary'} label={icon} onPress={onPress} />
       </Box>,
     )
 
@@ -368,7 +374,7 @@ export const drawDesktopPane = (
                 levelOf(bindings) === 'global' ? 'Globally' : `For this ${levelOf(bindings)}`,
                 undefined,
               ],
-              ['Chat changes', isChatUnlocked ? 'Unlocked' : 'Locked', undefined],
+              ['Chat changes', isChatUnlocked ? 'Unlocked' : 'Locked', isChatUnlocked ? ACCENT : undefined],
             ].map(([label, value, color]) => (
               <Box key={`status:${label}`} flexDirection="column">
                 <Text {...type('caption', 'bold')} dimColor>
@@ -389,6 +395,8 @@ export const drawDesktopPane = (
               ? 'Chat changes unlocked: Claude can change profiles. Click to lock.'
               : 'Chat changes locked: only you change profiles. Click to unlock.',
             () => actions.onChatAccess(!isChatUnlocked),
+            // unlocked is the state to notice: a filled accent button, not a second grey padlock
+            isChatUnlocked,
           )}
           {iconButton('refresh', REFRESH_ICON, 'Refresh: read the harness again', actions.onRefresh)}
         </Box>
