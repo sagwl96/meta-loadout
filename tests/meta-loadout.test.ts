@@ -1832,16 +1832,56 @@ describe('chat lock', () => {
     expect(String(after.result)).toContain('locked')
   })
 
-  test('the pane button flips it on terminal and desktop', async ($, on) => {
+  test('the pane button flips it on terminal', async ($, on) => {
     harness(on)
-    for (const surface of ['terminal', 'desktop'] as const) {
-      const ui = await mountPane($, surface)
-      await ui.press({ key: 'chat-access' })
+    const ui = await mountPane($, 'terminal')
+    await ui.press({ key: 'chat-access' })
 
-      expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: unlocked')
-      await ui.press({ key: 'chat-access' })
-      expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: locked')
-      await ui.unmount()
-    }
+    expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: unlocked')
+    await ui.press({ key: 'chat-access' })
+    expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: locked')
+    await ui.unmount()
+  })
+
+  test('the desktop lock icon flips it, with its words in a tooltip and the status card', async ($, on) => {
+    harness(on)
+    const ui = await mountPane($, 'desktop')
+    await ui.press({ key: 'chat-access' })
+
+    expect((await ui.find({ key: 'chat-access' }))?.text).toBe('🔓')
+    expect(await ui.find({ type: 'Text', text: /Click to lock\./ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Unlocked$/ })).toBeDefined()
+    await ui.press({ key: 'chat-access' })
+    expect((await ui.find({ key: 'chat-access' }))?.text).toBe('🔒')
+    await ui.unmount()
+  })
+})
+
+describe('desktop type scale', () => {
+  const titleOf = async ($: Engine) => {
+    const ui = await mountPane($, 'desktop')
+    const found = await ui.find({ type: 'Text', text: /^Meta Loadout$/ })
+    await ui.unmount()
+
+    return found?.props
+  }
+
+  test('sizes the text on an engine that has the scale', async ($, on) => {
+    harness(on)
+    on('session.version', () => ({ value: { version: '2.1.308', base: '2.1.308' } }) as never)
+    // an engine older than the scale refuses the sized pane outright, which is what the version check is for
+    const drawn = await titleOf($).catch((error: unknown) => String(error))
+
+    if (typeof drawn === 'string') expect(drawn).toContain('"size" is not allowed')
+    else expect(drawn).toMatchObject({ size: 'title', weight: 'bold' })
+  })
+
+  test('falls back to bold on an older engine', async ($, on) => {
+    harness(on)
+    on('session.version', () => ({ value: { version: '2.1.296', base: '2.1.296' } }) as never)
+    const props = await titleOf($)
+
+    expect(props).toMatchObject({ bold: true })
+    expect(props?.size).toBeUndefined()
   })
 })

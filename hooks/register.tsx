@@ -939,6 +939,21 @@ const isHookEventMuted = async ($: EngineInterface, event: string) => {
 const offNote = async ($: EngineInterface, what: string) =>
   `${what} is turned off in the active meta-loadout profile "${(await activeProfile($)).name}". Re-enable it with /meta-loadout.`
 
+const TYPE_SCALE_SINCE = [2, 1, 308]
+
+// Text `size` and `weight` arrived in 2.1.308; an older engine refuses a pane using them.
+const hasTypeScale = async ($: EngineInterface) => {
+  try {
+    const { version } = await $.session.version()
+    const parts = version.split(/[.-]/).slice(0, 3).map(Number)
+    const index = TYPE_SCALE_SINCE.findIndex((need, at) => (parts[at] ?? 0) !== need)
+
+    return index === -1 || (parts[index] ?? 0) > (TYPE_SCALE_SINCE[index] ?? 0)
+  } catch {
+    return false
+  }
+}
+
 const openPane = async ($: EngineInterface) => {
   await syncFromStore($)
   await refresh($)
@@ -1393,6 +1408,7 @@ export const register: Register = on => {
         isOnIn(profile, item, ledger, profile.name === appliedNameFor(bindings, item)),
       view,
       isChatUnlocked: await read($, chatUnlockedAtom),
+      hasTypeScale: e.surface !== 'terminal' && (await hasTypeScale($)),
       columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
       rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
       isDocked: e.props.placement === 'dock',

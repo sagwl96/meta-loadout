@@ -13,7 +13,6 @@ import {
   UNSET_KEY_PREFIX,
   actionsOf,
   bindingLabel,
-  chatAccessLabel,
   clipEnd,
   isUnsettable,
   fileLinkOf,
@@ -33,7 +32,8 @@ const DESKTOP_PAGE_SIZE = 40
 // section titles, counts of what is on. Everything else stays neutral.
 const ACCENT = 'claude'
 const CARD = { borderStyle: 'round', borderColor: 'promptBorder', padding: 1, gap: 1 } as const
-const HERO = { ...CARD, borderColor: ACCENT } as const
+// The status card only informs: a thicker accent border sets it apart from the cards you act in.
+const STATUS = { borderStyle: 'bold', borderColor: ACCENT, padding: 1, gap: 1 } as const
 const CHIP = { borderStyle: 'round', paddingX: 1 } as const
 const KINDS_IN_GROUPS: readonly Kind[] = ['skill', 'agent', 'mcp']
 const STANDALONE = 'Standalone'
@@ -53,6 +53,18 @@ const LEVEL_HINTS = {
   project: 'Every chat in this project',
   global: 'Everywhere else',
 } as const
+const LOCK_ICONS = { locked: '🔒', unlocked: '🔓' } as const
+const REFRESH_ICON = '↻'
+type TextSize = 'caption' | 'footnote' | 'body' | 'heading' | 'title'
+type TextWeight = 'regular' | 'medium' | 'semibold' | 'bold'
+// Engines before the type scale refuse `size` and `weight` and draw no pane,
+// so there the scale falls back to bold for the heavier weights.
+const typeScaleOf =
+  (hasTypeScale: boolean) =>
+  (size?: TextSize, weight?: TextWeight) =>
+    hasTypeScale
+      ? { ...(size === undefined ? {} : { size }), ...(weight === undefined ? {} : { weight }) }
+      : { bold: weight === 'bold' || weight === 'semibold' }
 const capitalized = (word: string) => `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`
 
 export const drawDesktopPane = (
@@ -68,9 +80,11 @@ export const drawDesktopPane = (
     isOn,
     view,
     isChatUnlocked,
+    hasTypeScale,
   }: PaneModel,
   actions: PaneActions,
 ) => {
+  const type = typeScaleOf(hasTypeScale)
   const query = view.query.trim()
   const lines = linesOf(items, isOn, view, query)
   const pages = Math.max(1, Math.ceil(lines.length / DESKTOP_PAGE_SIZE))
@@ -101,18 +115,42 @@ export const drawDesktopPane = (
 
   const chip = (key: string, label: string, color?: string) => (
     <Box key={key} {...CHIP} borderColor={color ?? 'promptBorder'}>
-      <Text color={color} wrap="truncate-end">
+      <Text {...type('footnote')} color={color} wrap="truncate-end">
         {label}
       </Text>
     </Box>
   )
 
+  // An icon-only button whose words show beside it while the pointer is on it.
+  const iconButton = (key: string, icon: string, tip: string, onPress: () => void) => (
+    <Box key={`tip:${key}`} position="relative">
+      <Button key={key} variant="secondary" label={icon} onPress={onPress} />
+      <Box
+        position="absolute"
+        top={3}
+        right={0}
+        display="none"
+        hover={{ display: 'flex' }}
+        {...CHIP}
+        backgroundColor="subtle"
+      >
+        <Text {...type('caption')} wrap="end">
+          {tip}
+        </Text>
+      </Box>
+    </Box>
+  )
+
   const title = (label: string, hint?: string) => (
     <Box flexDirection="column">
-      <Text bold color={ACCENT}>
+      <Text {...type('heading', 'semibold')} color={ACCENT}>
         {label}
       </Text>
-      {hint !== undefined && <Text dimColor>{hint}</Text>}
+      {hint !== undefined && (
+        <Text {...type('caption')} dimColor>
+          {hint}
+        </Text>
+      )}
     </Box>
   )
 
@@ -173,6 +211,7 @@ export const drawDesktopPane = (
         key={`section:${kind}`}
         plain
         label={`${isOpen ? '▾' : '▸'}  ${KIND_LABELS[kind]}`}
+        hover={{ color: ACCENT }}
         // a search shows every matching section open, so a press would change view.open unseen
         onPress={() =>
           view.query.trim() === ''
@@ -202,10 +241,14 @@ export const drawDesktopPane = (
         hover={ROW_HOVER}
       >
         <Box flexDirection="column" flexShrink={1}>
-          <Text bold={isItemOn} dimColor={!isItemOn} wrap="truncate-end">
+          <Text
+            {...type(undefined, isItemOn ? 'medium' : 'regular')}
+            dimColor={!isItemOn}
+            wrap="truncate-end"
+          >
             {item.name}
           </Text>
-          <Text dimColor wrap="truncate-start">
+          <Text {...type('caption')} dimColor wrap="truncate-start">
             {fileLink === undefined ? (
               item.origin
             ) : (
@@ -248,9 +291,11 @@ export const drawDesktopPane = (
             alignItems="center"
             paddingTop={1}
           >
-            <Text bold>{source}</Text>
+            <Text {...type(undefined, 'semibold')}>{source}</Text>
             <Box flexDirection="row" gap={2} alignItems="center">
-              <Text dimColor>{`${onCount} of ${among.length} on`}</Text>
+              <Text {...type('footnote')} dimColor>
+                {`${onCount} of ${among.length} on`}
+              </Text>
               {among.length > 1 && drawBulk(`${kind}:${source}`, among)}
             </Box>
           </Box>
@@ -283,36 +328,45 @@ export const drawDesktopPane = (
 
   return (
     <Box flexDirection="column" gap={2} padding={1}>
-      <Box key="hero" flexDirection="column" {...HERO}>
-        <Box
-          flexDirection="row"
-          justifyContent="space-between"
-          alignItems="center"
-          flexWrap="wrap"
-          gap={1}
-        >
-          <Box flexDirection="column">
-            <Text bold color={ACCENT}>
-              Meta Loadout
-            </Text>
-            <Text dimColor>Profiles for your skills, MCP servers, plugins and settings</Text>
-          </Box>
-          <Box flexDirection="row" gap={1} alignItems="center">
-            <Button
-              key="chat-access"
-              variant={isChatUnlocked ? 'primary' : 'secondary'}
-              label={chatAccessLabel(isChatUnlocked)}
-              onPress={() => actions.onChatAccess(!isChatUnlocked)}
-            />
-            <Button key="refresh" variant="secondary" label="Refresh" onPress={actions.onRefresh} />
+      <Box flexDirection="row" gap={2} alignItems="flex-start">
+        <Box key="status" flexDirection="column" flexGrow={1} {...STATUS}>
+          <Text {...type('title', 'bold')} color={ACCENT}>
+            Meta Loadout
+          </Text>
+          <Text {...type('footnote')} dimColor>
+            Profiles for your skills, MCP servers, plugins and settings
+          </Text>
+          <Box flexDirection="row" gap={4} flexWrap="wrap" marginTop={1}>
+            {[
+              ['In effect', applied, ACCENT],
+              [
+                'Set',
+                levelOf(bindings) === 'global' ? 'Globally' : `For this ${levelOf(bindings)}`,
+                undefined,
+              ],
+              ['Chat changes', isChatUnlocked ? 'Unlocked' : 'Locked', undefined],
+            ].map(([label, value, color]) => (
+              <Box key={`status:${label}`} flexDirection="column">
+                <Text {...type('caption', 'bold')} dimColor>
+                  {label}
+                </Text>
+                <Text {...type('heading', 'bold')} color={color}>
+                  {value}
+                </Text>
+              </Box>
+            ))}
           </Box>
         </Box>
-        <Box flexDirection="row" gap={1} alignItems="center" flexWrap="wrap">
-          <Text dimColor>Applied</Text>
-          {chip('applied', applied, ACCENT)}
-          <Text dimColor>
-            {levelOf(bindings) === 'global' ? 'globally' : `for this ${levelOf(bindings)}`}
-          </Text>
+        <Box flexDirection="column" gap={1}>
+          {iconButton(
+            'chat-access',
+            isChatUnlocked ? LOCK_ICONS.unlocked : LOCK_ICONS.locked,
+            isChatUnlocked
+              ? 'Chat changes unlocked: Claude can change profiles. Click to lock.'
+              : 'Chat changes locked: only you change profiles. Click to unlock.',
+            () => actions.onChatAccess(!isChatUnlocked),
+          )}
+          {iconButton('refresh', REFRESH_ICON, 'Refresh: read the harness again', actions.onRefresh)}
         </Box>
       </Box>
       <Box key="levels" flexDirection="column" {...CARD}>

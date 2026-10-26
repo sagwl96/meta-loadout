@@ -34,6 +34,7 @@ export type PaneModel = {
   isOn: (item: Item) => boolean
   view: View
   isChatUnlocked: boolean
+  hasTypeScale: boolean
   columns: number
   rows: number
   isDocked: boolean
