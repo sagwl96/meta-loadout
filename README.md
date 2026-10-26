@@ -8,10 +8,11 @@ Based on [loadout](https://github.com/MK27MK/loadout) by Mattia Carella (MIT). m
 - **All on / All off** per card (kind) and per plugin group
 - **New profile** from scratch, with everything on or everything off
 - a profile **per chat, per project, or globally**
+- profiles shared live between open chats, and a **chat lock** that decides whether Claude may change them when you ask
 
-![The meta-loadout desktop pane](assets/desktop-pane.png)
+<p align="center"><img src="assets/desktop-pane.png" alt="The meta-loadout desktop pane: a status card with the profile in effect, where it applies, the profile actions, and cards of elements with progress bars" width="560"></p>
 
-*Illustration of the desktop pane (drawn from its layout, not a screenshot).*
+*A mockup of the desktop pane, drawn from its layout. The images and animations below come from [`docs/mockup`](docs/mockup) and can be regenerated with `docs/mockup/record.mjs`.*
 
 ## Install
 
@@ -62,7 +63,16 @@ Keys: Tab moves between controls, Enter presses, Esc returns to the prompt.
 
 ## Desktop app
 
-In the Claude desktop app and the VS Code extension the pane is a GUI instead of the terminal text view: dropdowns for profile, project and scope, an On/Off button per element, one card per kind (click its header to open it), scope chips, clickable file origins, and Prev/Next paging. Each card and each plugin group has **All on** and **All off**, and **New profile** creates a profile from scratch with everything on or off. A search bar finds elements by name, origin or kind (for example `mcp` or `ecc`), opens the matching cards and limits **All on** / **All off** to the matches. The terminal keeps the text view.
+In the Claude desktop app and the VS Code extension the pane is a GUI instead of the terminal text view. From top to bottom:
+
+- **Status card** (orange border): the profile in effect, where it is set, and whether chat changes are locked. It only informs; beside it, 🔒 / 🔓 switches the chat lock and 🔄 reads the harness again. Hover an icon for what it does.
+- **Where it applies**: what is set for this chat, this project and globally. The level in effect is outlined in orange; **Unset** removes a chat or project profile.
+- **Profile**: pick a profile to look at, apply it to the chat, the project or globally, or make, duplicate, rename and delete one.
+- **Elements**: search by name, origin or kind (for example `mcp` or `ecc`), and filter by project and scope. Below it, one card per kind (click its header to open it). Each card and plugin group has a progress bar of how many are on (hover it for the numbers) and **All on** / **All off**, which a search limits to the matches. Each element has a scope chip, a clickable origin and an **On** / **Off** button.
+
+The terminal keeps the text view.
+
+![Turning elements on and off: one switch, a progress bar per card, All on for a group](assets/toggle.gif)
 
 ## What it manages
 
@@ -97,6 +107,8 @@ Every row shows where the element comes from:
 | `mixed` | A hook event with hooks from more than one scope |
 
 ## Profiles
+
+![Making a profile from scratch, switching on one group, then applying another profile to this chat only](assets/profiles.gif)
 
 A profile starts with everything on or everything off, and remembers the elements you toggled.
 
@@ -148,6 +160,8 @@ To compose a setup from several harnesses, create a profile that starts with eve
 
 ### Chat lock
 
+![Locked, Claude can only read profiles; after unlocking in the pane, Claude makes and applies a profile when asked](assets/lock.gif)
+
 You choose how profiles may be changed:
 
 - **Locked** (the default): only you change profiles, from the pane or by typing `/meta-loadout`. Claude can still read them (`list`, `status`, `show`).
@@ -156,6 +170,8 @@ You choose how profiles may be changed:
 Switch it with `/meta-loadout unlock` and `/meta-loadout lock`, or the **Chat changes** button in the pane. The setting is shared by every chat. Only you can switch it: Claude cannot lock or unlock it, and a `/meta-loadout` command you did not type (another session's, a model-written one) can only read.
 
 ### Several chats at once
+
+![A profile made in one chat appears in another open chat's pane within seconds](assets/sync.gif)
 
 Every chat reads the same profiles. A profile made, renamed, deleted or toggled in one chat shows in the others within a few seconds, with no restart, and a change in one chat never writes away another chat's.
 

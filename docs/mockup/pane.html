@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>meta-loadout mockup</title>
+<!--
+  A mockup of the meta-loadout desktop pane, drawn from hooks/desktopView.tsx.
+  record.mjs opens it as pane.html?scene=<name>&t=<ms> and screenshots each frame;
+  render(t) is a pure function of the scene and the time, so every frame is reproducible.
+-->
+<style>
+  :root {
+    --bg: #262624; --panel: #1f1e1d; --card: #2b2a27; --line: #403f3a; --subtle: #353430;
+    --text: #f3f1ea; --dim: #a19f96; --accent: #d97757; --accent-soft: #d977572e;
+    --user: #3a3935;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif; }
+  #app { width: 1200px; height: 800px; display: flex; overflow: hidden; position: relative; }
+  .chat { width: 430px; border-right: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-direction: column; padding: 18px; gap: 12px; }
+  .chat h1 { font-size: 13px; color: var(--dim); font-weight: 500; margin: 0 0 6px; }
+  .msg { padding: 10px 13px; border-radius: 14px; max-width: 92%; }
+  .msg.user { align-self: flex-end; background: var(--user); }
+  .msg.claude { align-self: flex-start; }
+  .tool { font-size: 12px; color: var(--dim); border: 1px solid var(--line); border-radius: 10px;
+    padding: 7px 10px; font-family: ui-monospace, Menlo, monospace; }
+  .tool b { color: var(--accent); font-weight: 600; }
+  .spacer { flex: 1; }
+  .band { align-self: flex-start; font-size: 12px; color: var(--accent); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 10px; }
+  .prompt { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; color: var(--dim); min-height: 46px; }
+  .prompt.typing { color: var(--text); }
+  .pane { flex: 1; overflow: hidden; position: relative; }
+  .pane-inner { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .pane-title { font-size: 12px; color: var(--dim); padding: 10px 16px 0; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; background: var(--card); }
+  .status-row { display: flex; gap: 12px; align-items: flex-start; }
+  .status { flex: 1; border: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; background: var(--card); }
+  .status .title { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .status .sub { font-size: 12px; color: var(--dim); }
+  .fields { display: flex; gap: 34px; margin-top: 12px; }
+  .field .label { font-size: 11px; font-weight: 700; color: var(--dim); text-transform: none; }
+  .field .value { font-size: 17px; font-weight: 700; }
+  .field .value.accent { color: var(--accent); }
+  .icons { display: flex; flex-direction: column; gap: 8px; }
+  .tipwrap { position: relative; }
+  .icon { width: 44px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--subtle);
+    display: grid; place-items: center; font-size: 18px; }
+  .icon.lit { background: var(--accent); border-color: var(--accent); }
+  .tip { position: absolute; right: 0; top: 44px; white-space: nowrap; font-size: 12px; background: var(--subtle);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; z-index: 5; }
+  h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--accent); }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 1px; }
+  .levels { display: flex; gap: 12px; }
+  .level { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .level.win { border-color: var(--accent); }
+  .level .name { font-weight: 700; display: flex; justify-content: space-between; }
+  .level.win .name > span:first-child { color: var(--accent); }
+  .level .unset { font-weight: 400; font-size: 12px; color: var(--dim); }
+  .level .val { margin-top: 4px; }
+  .row-wrap { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .select, .input { border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; min-width: 150px; background: var(--panel); }
+  .select small, .input small { display: block; font-size: 11px; color: var(--dim); }
+  .input.focus { border-color: var(--accent); }
+  .btn { border-radius: 9px; padding: 7px 12px; border: 1px solid var(--line); background: var(--subtle); font-size: 13px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .notice { border: 1px solid var(--accent); border-radius: 12px; padding: 9px 12px; }
+  .section-head { display: flex; justify-content: space-between; align-items: center; }
+  .section-head .label { font-weight: 600; font-size: 15px; }
+  .section-head .right { display: flex; gap: 10px; align-items: center; }
+  .bar { width: 150px; height: 12px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); transition: none; }
+  .link { color: var(--dim); font-size: 13px; }
+  .group-head { display: flex; justify-content: space-between; align-items: center; padding-top: 6px; }
+  .group-head b { font-weight: 600; }
+  .item { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-radius: 8px; }
+  .item.hover { background: var(--subtle); }
+  .item .nm { font-weight: 500; }
+  .item.off .nm { font-weight: 400; color: var(--dim); }
+  .item .origin { font-size: 11px; color: var(--dim); }
+  .item .right { display: flex; gap: 10px; align-items: center; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--dim); }
+  .toggle { min-width: 46px; text-align: center; }
+  .cursor { position: absolute; width: 22px; height: 22px; z-index: 20; pointer-events: none; }
+  .ripple { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
+    border: 2px solid var(--accent); z-index: 19; }
+  .caption { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: #000c;
+    color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 15px; z-index: 30; white-space: nowrap; }
+  .split { display: flex; flex: 1; }
+  .split .pane { border-right: 1px solid var(--line); }
+  .split .pane:last-child { border-right: 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const ITEMS = () => ({
+  skill: { label: 'Skills & commands', open: false, groups: [
+    ['ecc', [['ecc:plan', 'plugin ecc (user)'], ['ecc:tdd', 'plugin ecc (user)'], ['ecc:review', 'plugin ecc (user)'], ['ecc:refactor', 'plugin ecc (user)']]],
+    ['Standalone', [['deploy', '~/.claude/commands/deploy.md'], ['changelog', '.claude/commands/changelog.md']]],
+  ] },
+  mcp: { label: 'MCP servers', open: false, groups: [
+    ['MCP', [['github', '~/.claude.json'], ['linear', 'claude.ai connector'], ['playwright', '.mcp.json'], ['blender', '~/.claude.json']]],
+  ] },
+  plugin: { label: 'Plugins', open: false, groups: [
+    ['', [['ecc@ecc', '~/.claude/settings.json'], ['ponytail@ponytail', '~/.claude/settings.json'], ['meta-loadout@meta-loadout', '~/.claude/settings.json']]],
+  ] },
+  rule: { label: 'Rules', open: false, groups: [
+    ['', [['rules/testing.md', '~/.claude/rules/testing.md'], ['rules/style.md', '.claude/rules/style.md']]],
+  ] },
+})
+const SCOPE_OF = { skill: 'plugin', mcp: 'user', plugin: 'user', rule: 'user' }
+
+const fresh = () => {
+  const sections = ITEMS()
+  const on = {}
+  for (const s of Object.values(sections)) for (const [, rows] of s.groups) for (const [n] of rows) on[n] = true
+  on['blender'] = false
+  return {
+    profiles: ['default', 'vanilla', 'work'], viewed: 'default',
+    bindings: { chat: '—', project: '—', global: 'default' },
+    unlocked: false, sections, on: { default: on, work: { ...on, github: true, blender: false } },
+    notice: '', tip: '', hover: '', creating: false, typed: '', typing: '', chat: [], scroll: 0,
+    second: null,
+  }
+}
+
+const applied = st => (st.bindings.chat !== '—' ? st.bindings.chat : st.bindings.project !== '—' ? st.bindings.project : st.bindings.global)
+const levelOf = st => (st.bindings.chat !== '—' ? 'chat' : st.bindings.project !== '—' ? 'project' : 'global')
+const onMap = (st, p) => (st.on[p] ??= Object.fromEntries(Object.keys(st.on.default).map(k => [k, p !== 'vanilla'])))
+
+// ---- scenes: steps are [at ms, cursor target key | null, action(st) | null, caption?]
+const SCENES = {
+  hero: { length: 1, paneOnly: true, steps: [[0, null, st => { st.sections.skill.open = true; st.sections.mcp.open = true; st.on.default['ecc:refactor'] = false }]] },
+
+  toggle: { length: 11000, steps: [
+    [0, null, null, 'Every skill, MCP server, plugin and rule has one switch'],
+    [900, 'section:skill', st => { st.sections.skill.open = true }],
+    [1400, null, st => { st.scroll = 540 }],
+    [2300, 'toggle:ecc:tdd', st => { st.on[st.viewed]['ecc:tdd'] = false; st.notice = 'ecc:tdd is off in profile "default".' }, 'Turn one off…'],
+    [3600, 'toggle:ecc:review', st => { st.on[st.viewed]['ecc:review'] = false; st.notice = 'ecc:review is off in profile "default".' }],
+    [5000, 'bar:skill', st => { st.tip = 'bar:skill' }, '…the bar shows how many are on (hover for the numbers)'],
+    [6800, 'bulk-on:skill:ecc', st => { st.tip = ''; for (const n of ['ecc:tdd', 'ecc:review']) st.on[st.viewed][n] = true; st.notice = 'Turned on 2 elements in profile "default".' }, 'or switch a whole group with All on / All off'],
+    [7600, null, st => { st.scroll = 760 }],
+    [8400, 'section:mcp', st => { st.sections.mcp.open = true }],
+    [9800, 'toggle:github', st => { st.on[st.viewed].github = false; st.notice = 'github is off in profile "default". Every call to it is denied.' }],
+  ] },
+
+  profiles: { length: 13000, steps: [
+    [0, null, null, 'Profiles: whole setups you can switch'],
+    [900, 'new-profile', st => { st.creating = true }, 'New profile, starting with everything off'],
+    [2000, 'create-name', st => { st.typing = 'react' }],
+    [3200, 'create-submit', st => { st.creating = false; st.typing = ''; st.profiles.push('react'); st.viewed = 'react'; st.on.react = Object.fromEntries(Object.keys(st.on.default).map(k => [k, false])); st.bindings.global = 'react'; st.notice = 'Profile "react" is active.'; st.sections.skill.open = true }],
+    [3800, null, st => { st.scroll = 560 }],
+    [4800, 'bulk-on:skill:ecc', st => { for (const n of ['ecc:plan', 'ecc:tdd', 'ecc:review', 'ecc:refactor']) st.on.react[n] = true; st.notice = 'Turned on 4 elements in profile "react".' }, 'switch on just what this work needs'],
+    [5700, null, st => { st.scroll = 0 }],
+    [6400, 'profile-select', st => { st.viewed = 'work' }, 'Look at another profile…'],
+    [7900, 'action:apply-chat', st => { st.bindings.chat = 'work'; st.notice = 'Profile "work" is active in this chat.' }, '…and apply it to this chat only'],
+    [9600, 'level:chat', null, 'The most specific level wins: chat, then project, then global'],
+    [11200, 'unset:chat', st => { st.bindings.chat = '—'; st.viewed = 'react'; st.notice = 'No profile is set in this chat now; this chat uses "react", set everywhere.' }],
+  ] },
+
+  lock: { length: 14000, steps: [
+    [0, null, null, 'You choose: change profiles yourself, or let Claude do it'],
+    [800, null, st => { st.chat.push(['user', 'Turn off the blender MCP in my work profile']) }],
+    [1700, null, st => { st.chat.push(['tool', 'meta-loadout · profiles  set work blender off']) }],
+    [2500, null, st => { st.chat.push(['claude', 'Changing profiles from chat is locked. You can allow it with /meta-loadout unlock, or the lock button in the pane.']) }, 'Locked (the default): Claude can read profiles, not change them'],
+    [4600, 'chat-access', st => { st.tip = 'chat-access' }],
+    [6000, 'chat-access', st => { st.tip = ''; st.unlocked = true; st.notice = 'Chat changes are unlocked: Claude can change meta-loadout profiles when you ask it to.' }, 'Unlock it from the pane'],
+    [7600, null, st => { st.chat = [['user', 'Make a react profile with only the ecc skills, and use it in this chat']] }],
+    [8600, null, st => { st.chat.push(['tool', 'meta-loadout · profiles  new react off']); st.profiles.push('react'); st.on.react = Object.fromEntries(Object.keys(st.on.default).map(k => [k, false])) }, 'Unlocked: just ask'],
+    [9400, null, st => { st.chat.push(['tool', 'meta-loadout · profiles  set react ecc:plan on …']); for (const n of ['ecc:plan', 'ecc:tdd', 'ecc:review', 'ecc:refactor']) st.on.react[n] = true }],
+    [10200, null, st => { st.chat.push(['tool', 'meta-loadout · profiles  use react chat']); st.bindings.chat = 'react'; st.viewed = 'react'; st.sections.skill.open = true }],
+    [11000, null, st => { st.chat.push(['claude', 'Done: "react" is active in this chat, with the 4 ecc skills on and everything else off.']) }, 'Only you can lock or unlock it'],
+  ] },
+
+  sync: { length: 9000, split: true, steps: [
+    [0, null, null, 'Two chats open at once share one set of profiles'],
+    [900, 'new-profile', st => { st.creating = true }],
+    [2000, 'create-name', st => { st.typing = 'review' }],
+    [3200, 'create-submit', st => { st.creating = false; st.typing = ''; st.profiles.push('review'); st.notice = 'Profile "review" is active.'; st.bindings.global = 'review'; st.viewed = 'review' }, 'Make a profile in one chat…'],
+    [5600, null, st => { st.second = { profiles: [...st.profiles] } }, '…it shows in the other within seconds, no restart'],
+    [7200, 'profile-select-2', null],
+  ] },
+}
+
+// ---- drawing
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+const drawPane = (st, n = '', heading = 'Meta Loadout') => {
+  const prof = st.viewed, on = onMap(st, prof), app = applied(st), lvl = levelOf(st)
+  const profiles = n === '-2' && st.second === null ? st.profiles.filter(p => p !== 'review') : st.profiles
+  const count = sec => { let a = 0, b = 0; for (const [, rows] of sec.groups) for (const [nm] of rows) { b++; if (on[nm]) a++ } return [a, b] }
+  const bar = (key, a, b) => `<div class="tipwrap" data-key="${key}${n}"><div class="bar"><div style="width:${b ? (a / b) * 100 : 0}%"></div></div>${st.tip === key ? `<div class="tip">${a} of ${b} on</div>` : ''}</div>`
+  const sections = Object.entries(st.sections).map(([kind, sec]) => {
+    const [a, b] = count(sec)
+    const head = `<div class="section-head"><span class="label" data-key="section:${kind}${n}">${sec.open ? '▾' : '▸'}&nbsp; ${sec.label}</span>
+      <span class="right">${bar('bar:' + kind, a, b)}${sec.open ? '<span class="link">All on</span><span class="link">All off</span>' : ''}</span></div>`
+    if (!sec.open) return `<div class="card">${head}</div>`
+    const groups = sec.groups.map(([src, rows]) => {
+      const ga = rows.filter(([nm]) => on[nm]).length
+      const gh = src && kind === 'skill' ? `<div class="group-head"><b>${src}</b><span class="right" style="display:flex;gap:10px;align-items:center">${bar(`bar:${kind}:${src}`, ga, rows.length)}<span class="link" data-key="bulk-on:${kind}:${src}${n}">All on</span><span class="link">All off</span></span></div>` : ''
+      return gh + rows.map(([nm, origin]) => `<div class="item ${on[nm] ? '' : 'off'} ${st.hover === 'toggle:' + nm ? 'hover' : ''}">
+        <div><div class="nm">${esc(nm)}</div><div class="origin">${esc(origin)}</div></div>
+        <div class="right"><span class="chip">${SCOPE_OF[kind]}</span><span class="btn toggle ${on[nm] ? 'primary' : ''}" data-key="toggle:${nm}${n}">${on[nm] ? 'On' : 'Off'}</span></div></div>`).join('')
+    }).join('')
+    return `<div class="card">${head}${groups}</div>`
+  }).join('')
+  const level = l => `<div class="level ${lvl === l ? 'win' : ''}" data-key="level:${l}${n}"><div class="name"><span>${l[0].toUpperCase() + l.slice(1)}</span>${l !== 'global' && st.bindings[l] !== '—' ? `<span class="unset" data-key="unset:${l}${n}">Unset</span>` : ''}</div>
+    <div class="val">${st.bindings[l]}</div><div class="hint">${{ chat: 'This chat only', project: 'Every chat in this project', global: 'Everywhere else' }[l]}</div></div>`
+  return `<div class="pane-title">${heading}</div><div class="pane-inner" style="margin-top:${-st.scroll}px">
+    <div class="status-row"><div class="status"><div class="title">Meta Loadout</div><div class="sub">Profiles for your skills, MCP servers, plugins and settings</div>
+      <div class="fields"><div class="field"><div class="label">In effect</div><div class="value accent">${app}</div></div>
+      <div class="field"><div class="label">Set</div><div class="value">${lvl === 'global' ? 'Globally' : 'For this ' + lvl}</div></div>
+      <div class="field"><div class="label">Chat changes</div><div class="value ${st.unlocked ? 'accent' : ''}">${st.unlocked ? 'Unlocked' : 'Locked'}</div></div></div></div>
+      <div class="icons"><div class="tipwrap"><div class="icon ${st.unlocked ? 'lit' : ''}" data-key="chat-access${n}">${st.unlocked ? '🔓' : '🔒'}</div>${st.tip === 'chat-access' ? `<div class="tip">${st.unlocked ? 'Chat changes unlocked: Claude can change profiles. Click to lock.' : 'Chat changes locked: only you change profiles. Click to unlock.'}</div>` : ''}</div>
+      <div class="icon" data-key="refresh${n}">🔄</div></div></div>
+    <div class="card"><div><h2>Where it applies</h2><div class="hint">The most specific level that is set wins.</div></div><div class="levels">${['chat', 'project', 'global'].map(level).join('')}</div></div>
+    <div class="card"><div><h2>Profile</h2><div class="hint">Pick a profile to see and change what it turns on.</div></div>
+      <div class="row-wrap"><div class="select" data-key="profile-select${n}"><small>Profile</small>${prof}${prof === app ? ' (applied)' : ''} ▾</div>
+      <span class="btn" data-key="action:apply${n}">Apply globally</span><span class="btn" data-key="action:apply-project${n}">Apply to project</span><span class="btn primary" data-key="action:apply-chat${n}">Apply to chat</span>
+      <span class="btn" data-key="new-profile${n}">New profile</span><span class="btn">Duplicate</span><span class="btn">Rename</span>${prof === 'vanilla' ? '' : '<span class="btn">Delete</span>'}</div>
+      ${st.creating && !n ? `<div class="row-wrap"><div class="input focus" data-key="create-name"><small>New profile name</small>${st.typing ? esc(st.typing) + '▏' : '<span style="color:var(--dim)">name</span>'}</div><div class="select"><small>Start with</small>Everything off ▾</div><span class="btn primary" data-key="create-submit">create</span><span class="btn">Cancel</span></div>` : ''}
+      ${n === '-2' ? `<div class="hint">Profiles: ${profiles.map(p => (p === 'review' ? '<b style="color:var(--accent)">review</b>' : p)).join(' · ')}</div>` : ''}</div>
+    ${st.notice && !n ? `<div class="notice">${esc(st.notice)}</div>` : ''}
+    <div class="card"><div><h2>Elements</h2><div class="hint">In this project</div></div><div class="row-wrap"><div class="input" style="min-width:240px"><small>Search</small><span style="color:var(--dim)">Search skills, plugins, MCP…</span></div><div class="select"><small>Project</small>this project ▾</div><div class="select"><small>Scope</small>All scopes ▾</div></div></div>
+    ${sections}</div>`
+}
+
+const drawChat = st => `<div class="chat"><h1>${st.chat.length ? 'Chat' : 'Chat · ~/code/app'}</h1>
+  ${st.chat.map(([who, text]) => who === 'tool' ? `<div class="tool"><b>⏺</b> ${esc(text)}</div>` : `<div class="msg ${who}">${esc(text)}</div>`).join('')}
+  <div class="spacer"></div><div class="band">↗ meta-loadout · ${applied(st)}${levelOf(st) === 'global' ? '' : ` (${levelOf(st)})`}</div>
+  <div class="prompt">Reply to Claude…</div></div>`
+
+const CURSOR = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 2l7 19 2.6-7.4L20 11z" fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+
+function render(name, t) {
+  const scene = SCENES[name], st = fresh()
+  const steps = scene.steps.filter(s => s[0] <= t)
+  let caption = ''
+  for (const [, , act, cap] of steps) { if (act) act(st); if (cap) caption = cap }
+  const app = document.getElementById('app')
+  app.style.height = scene.paneOnly ? 'auto' : ''
+  app.style.width = scene.paneOnly ? '780px' : ''
+  if (scene.paneOnly) {
+    app.innerHTML = `<div class="pane">${drawPane(st)}</div>`
+  } else if (scene.split) {
+    const right = { ...st, notice: '', creating: false, viewed: st.second ? st.viewed : 'default', bindings: st.second ? st.bindings : { chat: '—', project: '—', global: 'default' } }
+    app.innerHTML = `<div class="split"><div class="pane">${drawPane(st, '', 'Chat 1 · Meta Loadout')}</div><div class="pane">${drawPane(right, '-2', 'Chat 2 · Meta Loadout')}</div></div>`
+  } else {
+    app.innerHTML = `${drawChat(st)}<div class="pane">${drawPane(st)}</div>`
+  }
+  // cursor: glides to each step's target over the 700 ms before it is pressed
+  const targets = scene.steps.filter(s => s[1])
+  const at = key => { const el = document.querySelector(`[data-key="${key}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return [r.left + Math.min(r.width / 2, 40), r.top + r.height / 2] }
+  let pos = [900, 700], from = pos
+  for (const [time, key] of targets) {
+    const to = at(key) ?? from
+    if (t >= time) { from = to; pos = to; continue }
+    const k = Math.max(0, Math.min(1, (t - (time - 700)) / 700)), e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2
+    pos = [from[0] + (to[0] - from[0]) * e, from[1] + (to[1] - from[1]) * e]
+    break
+  }
+  if (targets.length) app.insertAdjacentHTML('beforeend', `<div class="cursor" style="left:${pos[0]}px;top:${pos[1]}px">${CURSOR}</div>`)
+  const pressed = targets.find(([time]) => t >= time && t < time + 260)
+  if (pressed) { const p = at(pressed[1]); if (p) app.insertAdjacentHTML('beforeend', `<div class="ripple" style="left:${p[0]}px;top:${p[1]}px"></div>`) }
+  if (caption) app.insertAdjacentHTML('beforeend', `<div class="caption">${esc(caption)}</div>`)
+  return scene.length
+}
+
+const q = new URLSearchParams(location.search)
+window.render = render
+render(q.get('scene') ?? 'hero', Number(q.get('t') ?? 99999))
+</script>
+</body>
+</html>
