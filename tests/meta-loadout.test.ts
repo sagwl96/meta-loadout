@@ -87,6 +87,7 @@ type World = {
   policy?: Readonly<Record<string, unknown>>
   firstName?: string
   store?: Readonly<Record<string, unknown>>
+  shared?: Map<string, unknown>
   commands?: readonly (
     | { name: string; description: string; source: 'plugin'; plugin: string }
     | { name: string; description: string; source: 'user' }
@@ -103,7 +104,23 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
   ])
   const place = { root: ROOT, chat: 'chat-1' }
   const asked: string[] = []
-  mock.store(on, world.store)
+  if (world.shared === undefined) mock.store(on, world.store)
+  else {
+    // one store that a test changes as another chat would
+    const shared = world.shared
+    on('store.get', ($, e) => ({ value: structuredClone(shared.get(e.key)) }))
+    on('store.set', ($, e) => {
+      shared.set(e.key, structuredClone(e.value))
+
+      return { value: undefined }
+    })
+    on('store.delete', ($, e) => {
+      shared.delete(e.key)
+
+      return { value: undefined }
+    })
+    on('store.keys', () => ({ value: [...shared.keys()] }))
+  }
   mock.env(on, { HOME })
   on('session.root', () => ({ value: place.root }))
   on('session.id', () => ({ value: place.chat }))
@@ -1706,5 +1723,125 @@ describe('profiles per chat, project and globally', () => {
     expect(await ui.find({ key: 'unset:chat' })).toBeUndefined()
     expect((await loadout($, 'status')).text).toStartWith('Profile "default": ')
     await ui.unmount()
+  })
+})
+
+describe('profiles shared between chats', () => {
+  const otherChatAdds = (shared: Map<string, unknown>, name: string) =>
+    shared.set('profiles', [
+      ...(shared.get('profiles') as unknown[]),
+      { name, base: 'off', overrides: {} },
+    ])
+
+  test('lists a profile another chat made, without a restart', async ($, on) => {
+    const shared = new Map<string, unknown>()
+    harness(on, USER_SETTINGS, { shared })
+    await loadout($, 'list')
+
+    otherChatAdds(shared, 'elsewhere')
+
+    expect((await loadout($, 'list')).text).toContain('elsewhere')
+  })
+
+  test('a toggle here keeps the profile another chat made', async ($, on) => {
+    const shared = new Map<string, unknown>()
+    harness(on, USER_SETTINGS, { shared })
+    await loadout($, 'status')
+    const ui = await mountPaneWithOpen($, 'skill')
+
+    otherChatAdds(shared, 'elsewhere')
+    await ui.press({ key: SKILL_TOGGLE })
+    const names = (shared.get('profiles') as { name: string }[]).map(one => one.name)
+
+    expect(names).toContain('elsewhere')
+    expect((await loadout($, 'show default')).text).toContain('off  skill  ecc:plan')
+    await ui.unmount()
+  })
+
+  test('picks up another chat\'s profile on a timer while nobody types', async ($, on) => {
+    const clock = mock.clock(on)
+    const shared = new Map<string, unknown>()
+    harness(on, USER_SETTINGS, { shared })
+    await startSession($)
+    const ui = await mountPane($, 'desktop')
+    const optionsNow = async () =>
+      JSON.stringify((await ui.find({ key: 'profile-select' }))?.props.options)
+
+    otherChatAdds(shared, 'elsewhere')
+    const before = await optionsNow()
+    await clock.advance(3000)
+
+    expect(before).not.toContain('elsewhere')
+    expect(await optionsNow()).toContain('elsewhere')
+    await ui.unmount()
+  })
+})
+
+describe('set and show', () => {
+  test('turns one element off by name and shows it', async ($, on) => {
+    harness(on)
+
+    const said = await loadout($, 'set default ecc:plan off')
+    const ran = await $.command.run({ ...TYPED_BY_PERSON, command: 'ecc:plan', args: '' })
+
+    expect(said.text).toBe('ecc:plan is off in profile "default".')
+    expect(ran.text).toContain('/ecc:plan is turned off')
+    expect((await loadout($, 'show')).text).toContain('changes 1 element:')
+  })
+
+  test('names an element it cannot find and refuses vanilla', async ($, on) => {
+    harness(on)
+
+    expect((await loadout($, 'set default nope off')).text).toContain('No element is named "nope"')
+    expect((await loadout($, 'set vanilla ecc:plan on')).text).toContain('built in')
+  })
+})
+
+describe('chat lock', () => {
+  const askClaude = ($: Engine, command: string) =>
+    $.tool.call({ tool: 'mcp__meta-loadout__profiles', command } as never)
+
+  test('is locked by default: Claude can read but not change', async ($, on) => {
+    const files = harness(on)
+
+    const read = await askClaude($, 'list')
+    const refused = await askClaude($, 'use vanilla')
+
+    expect(String(read.result)).toContain('* default')
+    expect(String(refused.result)).toContain('locked')
+    expect(files.userSettings()).toEqual(USER_SETTINGS)
+  })
+
+  test('once the person unlocks it, Claude can switch profiles', async ($, on) => {
+    const files = harness(on)
+
+    await loadout($, 'unlock')
+    const done = await askClaude($, 'use vanilla')
+
+    expect(String(done.result)).toContain('Profile "vanilla" is active')
+    expect(files.userSettings().enabledPlugins).toEqual({ 'ecc@ecc': false })
+  })
+
+  test('Claude can never unlock or lock it itself', async ($, on) => {
+    harness(on)
+
+    const refused = await askClaude($, 'unlock')
+    const after = await askClaude($, 'new mine off')
+
+    expect(String(refused.result)).toContain('Only the person')
+    expect(String(after.result)).toContain('locked')
+  })
+
+  test('the pane button flips it on terminal and desktop', async ($, on) => {
+    harness(on)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await mountPane($, surface)
+      await ui.press({ key: 'chat-access' })
+
+      expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: unlocked')
+      await ui.press({ key: 'chat-access' })
+      expect((await ui.find({ key: 'chat-access' }))?.text).toContain('Chat changes: locked')
+      await ui.unmount()
+    }
   })
 })

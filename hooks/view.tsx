@@ -16,6 +16,7 @@ export type PaneActions = {
   onCreate: (name: string) => void
   onRename: (name: string) => void
   onCreateNew: (name: string, base: 'on' | 'off') => void
+  onChatAccess: (isUnlocked: boolean) => void
   onRefresh: () => void
   onProject: (path: string) => void
   onUnset: (level: Level) => void
@@ -32,12 +33,16 @@ export type PaneModel = {
   bindings: Bindings
   isOn: (item: Item) => boolean
   view: View
+  isChatUnlocked: boolean
   columns: number
   rows: number
   isDocked: boolean
 }
 
-export type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
+export const chatAccessLabel = (isUnlocked: boolean) =>
+  `Chat changes: ${isUnlocked ? 'unlocked' : 'locked'}`
+
+export type SectionLine ={ kind: Kind; isOpen: boolean; count: number; offCount: number }
 export type ItemLine = { item: Item; isInSection: boolean }
 export type Line = SectionLine | ItemLine
 type PickerOption = { value: string; label: string }
@@ -182,6 +187,7 @@ export const drawPane = (
     items,
     root,
     projects,
+    isChatUnlocked,
     profiles,
     profile,
     applied,
@@ -420,8 +426,19 @@ export const drawPane = (
           <Text dimColor>{profile.name}</Text>
           {drawBindings()}
         </Box>
-        <Box key="refresh-frame" {...FRAME}>
-          <Button key="refresh" plain dimColor label="Refresh" onPress={actions.onRefresh} />
+        <Box flexDirection="row" gap={1}>
+          <Box key="chat-access-frame" {...FRAME}>
+            <Button
+              key="chat-access"
+              plain
+              dimColor
+              label={chatAccessLabel(isChatUnlocked)}
+              onPress={() => actions.onChatAccess(!isChatUnlocked)}
+            />
+          </Box>
+          <Box key="refresh-frame" {...FRAME}>
+            <Button key="refresh" plain dimColor label="Refresh" onPress={actions.onRefresh} />
+          </Box>
         </Box>
       </Box>
       <Box flexDirection="row" gap={2} marginBottom={1}>

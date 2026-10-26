@@ -13,6 +13,7 @@ import {
   UNSET_KEY_PREFIX,
   actionsOf,
   bindingLabel,
+  chatAccessLabel,
   clipEnd,
   isUnsettable,
   fileLinkOf,
@@ -45,7 +46,18 @@ const APPLIED_SUFFIX = ' (applied)'
 
 export const drawDesktopPane = (
   { Box, Text, Button, Input, Select, Link }: DesktopElements,
-  { items, root, projects, profiles, profile, applied, bindings, isOn, view }: PaneModel,
+  {
+    items,
+    root,
+    projects,
+    profiles,
+    profile,
+    applied,
+    bindings,
+    isOn,
+    view,
+    isChatUnlocked,
+  }: PaneModel,
   actions: PaneActions,
 ) => {
   const query = view.query.trim()
@@ -241,7 +253,15 @@ export const drawDesktopPane = (
           <Text color="success">{` ${applied} `}</Text>
           <Text dimColor>{levelOf(bindings)}</Text>
         </Box>
-        <Button key="refresh" plain label="Refresh" onPress={actions.onRefresh} />
+        <Box flexDirection="row" gap={2} alignItems="center">
+          <Button
+            key="chat-access"
+            variant="secondary"
+            label={chatAccessLabel(isChatUnlocked)}
+            onPress={() => actions.onChatAccess(!isChatUnlocked)}
+          />
+          <Button key="refresh" plain label="Refresh" onPress={actions.onRefresh} />
+        </Box>
       </Box>
       <Box flexDirection="row" gap={3} alignItems="center" flexWrap="wrap">
         {LEVELS.map(level => (

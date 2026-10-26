@@ -91,10 +91,20 @@ const LOCKED_SOURCES = [
   { source: 'policy', origin: 'managed settings' },
   { source: 'flag', origin: 'command-line flag' },
 ] as const
-const READ_ONLY_VERBS = ['', 'list', 'status']
+const CHAT_ACCESS_KEY = 'chatUnlocked'
+const READ_ONLY_VERBS = ['', 'list', 'status', 'show']
+const LOCK_VERBS = ['lock', 'unlock']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
-const USAGE =
-  'Usage: /meta-loadout [list | status | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
+const STORE_POLL_MS = 3000
+const TOOL_NAME = 'profiles'
+const TOOL_ID = `mcp__${PLUGIN}__${TOOL_NAME}`
+const ARGUMENT_HINT =
+  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | project [<folder>]]'
+const USAGE = `Usage: /meta-loadout ${ARGUMENT_HINT}`
+const TOOL_DESCRIPTION =
+  "Reads or changes the user's meta-loadout harness profiles (which skills, MCP servers, plugins, rules and settings are on). `command` takes the words of /meta-loadout: list, status, show [<profile>], use <profile> [chat|project|global], unset <chat|project>, new <profile> [on|off], set <profile> <element> <on|off>, rename <profile> <new name>, delete <profile>. Reading always works; changes work only while the user has unlocked chat changes, and only the user can lock or unlock them."
+const LOCKED_NOTE =
+  'Changing meta-loadout profiles from chat is locked. The user can allow it with /meta-loadout unlock, or the "Chat changes" button in the meta-loadout pane.'
 const LEVEL_PHRASES: Readonly<Record<Level, string>> = {
   chat: 'in this chat',
   project: 'for this project',
@@ -136,6 +146,7 @@ const activeAtom = atom({ plugin: 'meta-loadout', key: 'active' } as const, DEFA
 const chatAtom = atom({ plugin: 'meta-loadout', key: 'chatProfile' } as const, UNBOUND)
 const projectAtom = atom({ plugin: 'meta-loadout', key: 'projectProfile' } as const, UNBOUND)
 const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
+const chatUnlockedAtom = atom({ plugin: 'meta-loadout', key: 'isChatUnlocked' } as const, false)
 const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
 const projectsAtom = atom({ plugin: 'meta-loadout', key: 'projects' } as const, NO_PROJECTS)
@@ -211,10 +222,17 @@ const bindingKeys = async ($: EngineInterface) => ({
 const storedMap = async ($: EngineInterface, level: Exclude<Level, 'global'>) =>
   bindingMapOf(await $.store.get(BINDING_KEYS[level]))
 
-const storedProfiles = async ($: EngineInterface) => {
+const storedProfileList = async ($: EngineInterface) => {
   const stored = await $.store.get(PROFILES_KEY)
-  const isFirstRun = stored === undefined
-  const kept = Array.isArray(stored) ? stored.filter(isProfile) : []
+
+  return {
+    isFirstRun: stored === undefined,
+    kept: Array.isArray(stored) ? stored.filter(isProfile) : [],
+  }
+}
+
+const storedProfiles = async ($: EngineInterface) => {
+  const { isFirstRun, kept } = await storedProfileList($)
   const { profiles, active } = restoredProfiles(
     isFirstRun ? undefined : kept,
     await $.store.get(ACTIVE_KEY),
@@ -327,9 +345,15 @@ const forgetProfile = ($: EngineInterface, name: string, renamedTo = '') =>
     ...(view.viewed === name ? { viewed: renamedTo } : {}),
   }))
 
-const saveProfiles = async ($: EngineInterface, profiles: Profile[]) => {
-  await update($, profilesAtom, () => profiles)
+// Every chat is its own process sharing one store: edit what the store holds now,
+// never this chat's copy, so a profile another chat made is not written away.
+// shortcut: read-then-write is not atomic across processes; two saves in the same
+// instant can still race, upgrade if the engine gains a compare-and-set store.
+const saveProfiles = async ($: EngineInterface, edit: (profiles: Profile[]) => Profile[]) => {
+  const { isFirstRun, kept } = await storedProfileList($)
+  const profiles = edit(restoredProfiles(isFirstRun ? undefined : kept, '').profiles)
   await $.store.set(PROFILES_KEY, profiles)
+  await update($, profilesAtom, () => profiles)
 }
 
 const readSettings = async ($: EngineInterface): Promise<SettingsReading[]> => {
@@ -390,7 +414,11 @@ const refresh = async ($: EngineInterface) => {
       scopes,
       checked.filter(one => one.isThere).map(one => one.path),
     ),
-    ...mcpItems(await $.tool.list(), mcpServerNames(mcpFile.value), paths),
+    ...mcpItems(
+      (await $.tool.list()).filter(tool => tool.name !== TOOL_ID),
+      mcpServerNames(mcpFile.value),
+      paths,
+    ),
     ...hookEventItems(
       settings.items,
       hookFiles.flatMap(file => file.sources),
@@ -485,6 +513,7 @@ const load = async ($: EngineInterface) => {
   const { isFirstRun, profiles, active, chat, project } = await storedProfiles($)
   await update($, profilesAtom, () => profiles)
   await holdBindings($, { chat, project, global: active })
+  await syncChatAccess($)
   if (isFirstRun) await $.store.set(PROFILES_KEY, profiles)
   $.ui.status(undefined)
 
@@ -511,11 +540,31 @@ const ensureLoaded = async ($: EngineInterface) => {
   if (!(await read($, loadedAtom))) await loadOnce($)
 }
 
-const syncBindings = async ($: EngineInterface) => {
-  const before = effectiveName(await bindingsNow($))
-  const { active, chat, project } = await storedProfiles($)
-  await holdBindings($, { chat, project, global: active })
-  if (effectiveName({ chat, project, global: active }) !== before) invalidateGates($)
+const syncChatAccess = async ($: EngineInterface) => {
+  const isUnlocked = (await $.store.get(CHAT_ACCESS_KEY)) === true
+  if ((await read($, chatUnlockedAtom)) !== isUnlocked)
+    await update($, chatUnlockedAtom, () => isUnlocked)
+}
+
+const sameJson = (one: unknown, other: unknown) => JSON.stringify(one) === JSON.stringify(other)
+
+// Picks up what other chats wrote to the shared store: new, renamed or deleted
+// profiles, their toggles, the bindings and the chat lock.
+const syncFromStore = async ($: EngineInterface) => {
+  if (!(await read($, loadedAtom))) return
+  const held = await profilesNow($)
+  const stored = await storedProfiles($)
+  const isListChanged = !sameJson(held.profiles, stored.profiles)
+  const before = { chat: held.chat, project: held.project, global: held.active }
+  const after = { chat: stored.chat, project: stored.project, global: stored.active }
+  if (isListChanged) await update($, profilesAtom, () => stored.profiles)
+  if (!sameJson(before, after)) await holdBindings($, after)
+  await syncChatAccess($)
+  const isApplyingOther = !sameJson(
+    findProfile(held.profiles, effectiveName(before)),
+    findProfile(stored.profiles, effectiveName(after)),
+  )
+  if (isApplyingOther) invalidateGates($)
 }
 
 const inTurn = <Result,>(
@@ -524,6 +573,7 @@ const inTurn = <Result,>(
 ): Promise<Result> => {
   const loadedWork = async () => {
     await ensureLoaded($)
+    await syncFromStore($)
 
     return work()
   }
@@ -581,8 +631,16 @@ const change = async (
       errors.push({ item, message: messageOf(error) })
     }
   }
+  const delta = Object.fromEntries(changed.map(item => [item.id, next.overrides[item.id] === true]))
   if (changed.length > 0)
-    await saveProfiles($, upsertProfile(await profilesOf($), next))
+    await saveProfiles($, profiles => {
+      const stored = profiles.find(one => one.name === profile.name) ?? profile
+
+      return upsertProfile(profiles, {
+        ...stored,
+        overrides: { ...stored.overrides, ...delta },
+      })
+    })
   await refresh($)
   if (changed.length > 0) invalidateGates($)
   const hint =
@@ -739,7 +797,7 @@ const addProfile = async ($: EngineInterface, created: Profile) => {
   const profiles = await profilesOf($)
   const problem = nameProblem(profiles, created.name)
   if (problem !== undefined) return say($, problem)
-  await saveProfiles($, [...profiles, created])
+  await saveProfiles($, stored => upsertProfile(stored, created))
 
   return switchProfile($, created.name, levelOf(await bindingsNow($)))
 }
@@ -768,7 +826,7 @@ const renameTo = async ($: EngineInterface, from: string, to: string) => {
     return say($, `No profile is named "${from}".`)
   const problem = nameProblem(profiles, to)
   if (problem !== undefined) return say($, problem)
-  await saveProfiles($, renameProfile(profiles, from, to))
+  await saveProfiles($, stored => renameProfile(stored, from, to))
   await forgetProfile($, from, to)
   for (const level of ['chat', 'project'] as const)
     await $.store.set(BINDING_KEYS[level], renamedInMap(await storedMap($, level), from, to))
@@ -817,7 +875,7 @@ const deleteProfile = async ($: EngineInterface, name: string) => {
   }
   for (const level of ['chat', 'project'] as const)
     await $.store.set(BINDING_KEYS[level], withoutName(await storedMap($, level), name))
-  await saveProfiles($, kept)
+  await saveProfiles($, stored => removeProfile(stored, name))
   await forgetProfile($, name)
 
   return say($, `Profile "${name}" deleted.`)
@@ -882,6 +940,7 @@ const offNote = async ($: EngineInterface, what: string) =>
   `${what} is turned off in the active meta-loadout profile "${(await activeProfile($)).name}". Re-enable it with /meta-loadout.`
 
 const openPane = async ($: EngineInterface) => {
+  await syncFromStore($)
   await refresh($)
   await refreshProjects($)
   await $.ui.open({ id: PANE, title: 'Meta Loadout', focus: true, rows: PANE_ROWS })
@@ -923,19 +982,113 @@ const status = async ($: EngineInterface) => {
   return [
     `Profile "${profile.name}"${level === 'global' ? '' : ` (${level})`}: ${off.length} of ${items.length} harness elements off.`,
     ...(level === 'global' ? [] : [`  ${bindingsLine(bindings)}`]),
+    `  Chat changes: ${(await read($, chatUnlockedAtom)) ? 'unlocked' : 'locked'}`,
     ...off.map(item => `  off  ${item.kind}  ${item.name}  [${item.scope}]`),
   ].join('\n')
 }
 
-const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin) => {
-  const [verb = '', name = '', option = ''] = args.trim().split(/\s+/)
-  if (!READ_ONLY_VERBS.includes(verb) && !PERSON_ORIGINS.includes(origin.kind))
-    return 'Only the person at the prompt can change meta-loadout profiles.'
+const showProfile = async ($: EngineInterface, name: string) => {
+  const profile =
+    name === ''
+      ? await activeProfile($)
+      : (await profilesOf($)).find(one => one.name === name)
+  if (profile === undefined) return `No profile is named "${name}".`
+  const items = await refresh($)
+  const overrides = Object.entries(profile.overrides)
+  const labelOf = (id: string) => {
+    const item = items.find(one => one.id === id)
+
+    return item === undefined ? id : `${item.kind}  ${item.name}`
+  }
+
+  return [
+    `Profile "${profile.name}" starts with everything ${profile.base} and changes ${overrides.length} element${overrides.length === 1 ? '' : 's'}:`,
+    ...overrides.map(([id, isOn]) => `  ${isOn ? 'on ' : 'off'}  ${labelOf(id)}`),
+  ].join('\n')
+}
+
+const matchingItems = (items: readonly Item[], element: string) => {
+  const byId = items.filter(item => item.id === element)
+  if (byId.length > 0) return byId
+  const byName = items.filter(item => item.name === element)
+  if (byName.length > 0) return byName
+  const lower = element.toLowerCase()
+
+  return items.filter(item => item.name.toLowerCase() === lower)
+}
+
+const setElement = async (
+  $: EngineInterface,
+  name: string,
+  element: string,
+  isOn: boolean,
+) => {
+  const profile = (await profilesOf($)).find(one => one.name === name)
+  if (profile === undefined) return say($, `No profile is named "${name}".`)
+  const refused = refusedProfile(profile)
+  if (refused !== undefined) return say($, refused)
+  await refresh($)
+  const found = matchingItems(await shownItems($), element)
+  if (found.length === 0)
+    return say($, `No element is named "${element}"; /meta-loadout status or the pane lists them.`)
+  if (found.length > 1)
+    return say(
+      $,
+      `"${element}" names ${found.length} elements; give one of their ids: ${found.map(item => item.id).join(', ')}.`,
+    )
+  const [item] = found as [Item]
+  if (item.isLocked)
+    return say($, `${item.name} is locked by the ${item.scope} scope and stays on.`)
+  const { errors, hint } = await change($, profile, [item], () => isOn)
+  if (errors[0] !== undefined)
+    return say($, `Could not change ${item.name}: ${errors[0].message}`)
+
+  return say($, `${item.name} is ${isOn ? 'on' : 'off'} in profile "${profile.name}".${hint}`)
+}
+
+const setChatAccess = async ($: EngineInterface, isUnlocked: boolean) => {
+  await $.store.set(CHAT_ACCESS_KEY, isUnlocked)
+  await update($, chatUnlockedAtom, () => isUnlocked)
+
+  return say(
+    $,
+    isUnlocked
+      ? 'Chat changes are unlocked: Claude can change meta-loadout profiles when you ask it to.'
+      : 'Chat changes are locked: only you can change meta-loadout profiles, from the pane or /meta-loadout.',
+  )
+}
+
+// 'person' typed it at the prompt, 'claude' called the tool, 'other' is any other
+// origin (a peer session, a model-authored command): it may only read.
+type Caller = 'person' | 'claude' | 'other'
+
+const callerOf = (origin: PromptOrigin): Caller =>
+  PERSON_ORIGINS.includes(origin.kind) ? 'person' : 'other'
+
+const runCommand = async ($: EngineInterface, args: string, caller: Caller) => {
+  const words = args.trim().split(/\s+/).filter(word => word !== '')
+  const [verb = '', name = '', option = ''] = words
+  if (!READ_ONLY_VERBS.includes(verb)) {
+    if (caller === 'other' || (caller === 'claude' && LOCK_VERBS.includes(verb)))
+      return 'Only the person at the prompt can change meta-loadout profiles.'
+    await ensureLoaded($)
+    await syncChatAccess($)
+    if (caller === 'claude' && !(await read($, chatUnlockedAtom))) return LOCKED_NOTE
+  }
   await ensureLoaded($)
-  if (verb === '') return openPane($)
+  await syncFromStore($)
+  if (verb === '') return caller === 'claude' ? listProfiles($) : openPane($)
   if (verb === 'list') return listProfiles($)
   if (verb === 'status') return status($)
+  if (verb === 'show') return inTurn($, () => showProfile($, name))
+  if (verb === 'lock' || verb === 'unlock')
+    return inTurn($, () => setChatAccess($, verb === 'unlock'))
   if (verb === 'project') return showProject($, name)
+  const switchWord = words.at(-1)
+  if (verb === 'set' && words.length >= 4 && (switchWord === 'on' || switchWord === 'off'))
+    return inTurn($, () =>
+      setElement($, name, words.slice(2, -1).join(' '), switchWord === 'on'),
+    )
   if (verb === 'use' && name !== '' && (option === '' || isLevel(option)))
     return inTurn($, () => switchProfile($, name, option === '' ? 'global' : option))
   if (verb === 'unset' && isLevel(name)) return inTurn($, () => unsetProfile($, name))
@@ -955,9 +1108,31 @@ export const register: Register = on => {
     await $.command.register({
       name: 'meta-loadout',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
-      argumentHint:
-        '[list | status | use <profile> [chat|project|global] | unset <chat|project> | new <profile> | rename <profile> <new name> | delete <profile> | project [<folder>]]',
+      argumentHint: ARGUMENT_HINT,
     })
+    try {
+      await $.tool.register({
+        name: TOOL_NAME,
+        description: TOOL_DESCRIPTION,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'The /meta-loadout words, for example "list" or "use work chat".',
+            },
+          },
+          required: ['command'],
+        },
+      })
+    } catch (error) {
+      $.ui.log(`meta-loadout could not offer its tool: ${messageOf(error)}`, { to: 'debug' })
+    }
+    $.clock.every(STORE_POLL_MS, () =>
+      void syncFromStore($).catch(error =>
+        $.ui.log(`meta-loadout could not read its store: ${messageOf(error)}`, { to: 'debug' }),
+      ),
+    )
     try {
       const isFirstRun = await loadOnce($)
       if (isFirstRun)
@@ -975,16 +1150,25 @@ export const register: Register = on => {
 
   on('command.run', { command: 'meta-loadout' }, async ($, e) => {
     try {
-      return { text: await runCommand($, e.args, e.origin) }
+      return { text: await runCommand($, e.args, callerOf(e.origin)) }
     } catch (error) {
       return { text: `meta-loadout failed: ${messageOf(error)}` }
+    }
+  })
+
+  on('tool.call', { tool: TOOL_ID }, async ($, e) => {
+    const { command } = e as { command?: unknown }
+    try {
+      return { result: await runCommand($, typeof command === 'string' ? command : '', 'claude') }
+    } catch (error) {
+      return { deny: `meta-loadout failed: ${messageOf(error)}` }
     }
   })
 
   on('prompt.submit', async ($, e, next) => {
     try {
       await ensureLoaded($)
-      await syncBindings($)
+      await syncFromStore($)
       await refresh($)
     } catch (error) {
       $.ui.log(`meta-loadout could not refresh the harness: ${messageOf(error)}`)
@@ -1052,7 +1236,7 @@ export const register: Register = on => {
   on('tool.describe', async ($, e, next) => {
     const described = await next(e)
     const server = mcpServerOf(e.tool)
-    if (server === undefined) return described
+    if (server === undefined || e.tool === TOOL_ID) return described
     if (!(await isOff($, `mcp:${server}`, 'mcp'))) return described
 
     return {
@@ -1063,7 +1247,7 @@ export const register: Register = on => {
 
   on('tool.call', async ($, e, next) => {
     const server = mcpServerOf(String(e.tool))
-    if (server === undefined) return next(e)
+    if (server === undefined || String(e.tool) === TOOL_ID) return next(e)
 
     return (await isOff($, `mcp:${server}`, 'mcp'))
       ? { deny: await offNote($, `The MCP server "${server}"`) }
@@ -1208,6 +1392,7 @@ export const register: Register = on => {
       isOn: item =>
         isOnIn(profile, item, ledger, profile.name === appliedNameFor(bindings, item)),
       view,
+      isChatUnlocked: await read($, chatUnlockedAtom),
       columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
       rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
       isDocked: e.props.placement === 'dock',
@@ -1229,8 +1414,11 @@ export const register: Register = on => {
         void inTurn($, () =>
           submitName($, typed, name => createProfile($, name, base)),
         ).catch(report),
+      onChatAccess: isUnlocked =>
+        void inTurn($, () => setChatAccess($, isUnlocked)).catch(report),
       onRefresh: () =>
-        void refresh($)
+        void syncFromStore($)
+          .then(() => refresh($))
           .then(() => refreshProjects($))
           .then(() => setView($, { notice: 'Refreshed.' }))
           .catch(report),

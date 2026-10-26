@@ -22,6 +22,16 @@ Based on [loadout](https://github.com/MK27MK/loadout) by Mattia Carella (MIT). m
 
 In the Claude desktop app: **+** next to the prompt box, then Plugins, Add marketplace `sagwl96/meta-loadout`, then Add plugin.
 
+It starts in the session you install it from: the `↗ meta-loadout` band appears above the prompt. If it does not, run `/reload-plugins`. Sessions started later load it by themselves.
+
+### Updating
+
+```
+claude plugin update meta-loadout@meta-loadout
+```
+
+Then run `/reload-plugins` in each open session, or start a new one. Profiles, bindings and the chat lock are kept: they live in the plugin's store, not in its code.
+
 To run it from a local clone instead:
 
 ```
@@ -126,6 +136,9 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout` | Opens the pane |
 | `/meta-loadout status` | Lists what is off in the active profile |
 | `/meta-loadout list` | Lists the profiles |
+| `/meta-loadout show [<profile>]` | Lists what a profile changes, the active one without a name |
+| `/meta-loadout set <profile> <element> <on\|off>` | Turns one element on or off in a profile, by its name or id (as `status` and the pane show them) |
+| `/meta-loadout lock` / `unlock` | Stops or allows Claude changing profiles when you ask it in chat |
 | `/meta-loadout use <profile> [chat\|project\|global]` | Switches profile, globally unless a level is given |
 | `/meta-loadout unset <chat\|project>` | Removes the chat or project profile |
 | `/meta-loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
@@ -133,7 +146,18 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout delete <profile>` | Deletes a profile |
 | `/meta-loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
 
-Only you can change profiles. A `/meta-loadout use` that you did not type is refused.
+### Chat lock
+
+You choose how profiles may be changed:
+
+- **Locked** (the default): only you change profiles, from the pane or by typing `/meta-loadout`. Claude can still read them (`list`, `status`, `show`).
+- **Unlocked**: you can also ask Claude in chat ("turn off the github MCP in my work profile", "make a profile for React with only these skills") and it changes them through its `meta-loadout` tool, with the same words as the command.
+
+Switch it with `/meta-loadout unlock` and `/meta-loadout lock`, or the **Chat changes** button in the pane. The setting is shared by every chat. Only you can switch it: Claude cannot lock or unlock it, and a `/meta-loadout` command you did not type (another session's, a model-written one) can only read.
+
+### Several chats at once
+
+Every chat reads the same profiles. A profile made, renamed, deleted or toggled in one chat shows in the others within a few seconds, with no restart, and a change in one chat never writes away another chat's.
 
 ## Safety
 
@@ -148,6 +172,15 @@ Only you can change profiles. A `/meta-loadout use` that you did not type is ref
 claude plugin validate .
 claude plugin test .
 ```
+
+To run your working copy instead of the released one, install it from the folder itself:
+
+```
+claude plugin marketplace add path/to/meta-loadout
+claude plugin install meta-loadout@meta-loadout
+```
+
+If the GitHub marketplace is already added, remove it first (`claude plugin marketplace remove meta-loadout`); the folder install may keep its profiles apart from the GitHub one's. A plugin from a folder marketplace is read from that folder, so after an edit `/reload-plugins` picks it up with no version bump. For a reload on every save, list the folder in `CLAUDE_CODE_PLUGIN_DIRS` instead (in the `env` block of `~/.claude/settings.json`), and in sessions the desktop app hosts also set `CLAUDE_CODE_PLUGIN_DIR_WATCH=1`. Uninstall the marketplace copy first so the mod does not load twice.
 
 The engine does not allow `$` to cross an import, so every engine call is in `hooks/register.tsx`. The other files in `hooks/` are pure functions.
 
