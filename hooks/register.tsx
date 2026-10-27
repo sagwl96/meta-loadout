@@ -93,6 +93,7 @@ const LOCKED_SOURCES = [
   { source: 'flag', origin: 'command-line flag' },
 ] as const
 const CHAT_ACCESS_KEY = 'chatUnlocked'
+const SUGGEST_KEY = 'suggestOff'
 const READ_ONLY_VERBS = ['', 'list', 'status', 'show']
 const LOCK_VERBS = ['lock', 'unlock']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
@@ -101,7 +102,7 @@ const TOOL_NAME = 'profiles'
 const TOOL_ID = `mcp__${PLUGIN}__${TOOL_NAME}`
 const FILE_COMMAND = `${PLUGIN}:open`
 const ARGUMENT_HINT =
-  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | project [<folder>]]'
+  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | suggest <on|off> | project [<folder>]]'
 const USAGE = `Usage: /meta-loadout ${ARGUMENT_HINT}`
 const TOOL_DESCRIPTION =
   "Reads or changes the user's meta-loadout harness profiles (which skills, MCP servers, plugins, rules and settings are on). `command` takes the words of /meta-loadout: list, status, show [<profile>], use <profile> [chat|project|global], unset <chat|project>, new <profile> [on|off], set <profile> <element> <on|off>, rename <profile> <new name>, delete <profile>. Reading always works; changes work only while the user has unlocked chat changes, and only the user can lock or unlock them."
@@ -149,6 +150,7 @@ const chatAtom = atom({ plugin: 'meta-loadout', key: 'chatProfile' } as const, U
 const projectAtom = atom({ plugin: 'meta-loadout', key: 'projectProfile' } as const, UNBOUND)
 const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
 const suggestedAtom = atom({ plugin: 'meta-loadout', key: 'suggested' } as const, [] as string[])
+const suggestOnAtom = atom({ plugin: 'meta-loadout', key: 'isSuggestOn' } as const, true)
 const chatUnlockedAtom = atom({ plugin: 'meta-loadout', key: 'isChatUnlocked' } as const, false)
 const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
@@ -547,6 +549,9 @@ const syncChatAccess = async ($: EngineInterface) => {
   const isUnlocked = (await $.store.get(CHAT_ACCESS_KEY)) === true
   if ((await read($, chatUnlockedAtom)) !== isUnlocked)
     await update($, chatUnlockedAtom, () => isUnlocked)
+  const isSuggestOn = (await $.store.get(SUGGEST_KEY)) !== false
+  if ((await read($, suggestOnAtom)) !== isSuggestOn)
+    await update($, suggestOnAtom, () => isSuggestOn)
 }
 
 const sameJson = (one: unknown, other: unknown) => JSON.stringify(one) === JSON.stringify(other)
@@ -960,6 +965,7 @@ const hasTypeScale = async ($: EngineInterface) => {
 // Offers, once per chat each, what the person named that the profile turns off.
 // It changes nothing: the model asks, and the person or an unlocked chat switches it on.
 const suggestionFor = async ($: EngineInterface, text: string) => {
+  if (!(await read($, suggestOnAtom))) return undefined
   const profile = await activeProfile($)
   const found = offMentions(await read($, itemsAtom), profile, text, await read($, suggestedAtom))
   if (found.length === 0) return undefined
@@ -1023,7 +1029,7 @@ const status = async ($: EngineInterface) => {
   return [
     `Profile "${profile.name}"${level === 'global' ? '' : ` (${level})`}: ${off.length} of ${items.length} harness elements off.`,
     ...(level === 'global' ? [] : [`  ${bindingsLine(bindings)}`]),
-    `  Chat changes: ${(await read($, chatUnlockedAtom)) ? 'unlocked' : 'locked'}`,
+    `  Chat changes: ${(await read($, chatUnlockedAtom)) ? 'unlocked' : 'locked'} · Suggestions: ${(await read($, suggestOnAtom)) ? 'on' : 'off'}`,
     ...off.map(item => `  off  ${item.kind}  ${item.name}  [${item.scope}]`),
   ].join('\n')
 }
@@ -1099,6 +1105,18 @@ const setChatAccess = async ($: EngineInterface, isUnlocked: boolean) => {
   )
 }
 
+const setSuggestions = async ($: EngineInterface, isOn: boolean) => {
+  await $.store.set(SUGGEST_KEY, isOn)
+  await update($, suggestOnAtom, () => isOn)
+
+  return say(
+    $,
+    isOn
+      ? 'Suggestions are on: when a message names something the profile turns off, Claude offers to turn it on.'
+      : 'Suggestions are off: meta-loadout no longer points out what the profile turns off.',
+  )
+}
+
 // 'person' typed it at the prompt, 'claude' called the tool, 'other' is any other
 // origin (a peer session, a model-authored command): it may only read.
 type Caller = 'person' | 'claude' | 'other'
@@ -1124,6 +1142,8 @@ const runCommand = async ($: EngineInterface, args: string, caller: Caller) => {
   if (verb === 'show') return inTurn($, () => showProfile($, name))
   if (verb === 'lock' || verb === 'unlock')
     return inTurn($, () => setChatAccess($, verb === 'unlock'))
+  if (verb === 'suggest' && (name === 'on' || name === 'off'))
+    return inTurn($, () => setSuggestions($, name === 'on'))
   if (verb === 'project') return showProject($, name)
   const switchWord = words.at(-1)
   if (verb === 'set' && words.length >= 4 && (switchWord === 'on' || switchWord === 'off'))
@@ -1452,6 +1472,7 @@ export const register: Register = on => {
         isOnIn(profile, item, ledger, profile.name === appliedNameFor(bindings, item)),
       view,
       isChatUnlocked: await read($, chatUnlockedAtom),
+      isSuggestOn: await read($, suggestOnAtom),
       hasTypeScale: e.surface !== 'terminal' && (await hasTypeScale($)),
       columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
       rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
@@ -1474,6 +1495,7 @@ export const register: Register = on => {
         void inTurn($, () =>
           submitName($, typed, name => createProfile($, name, base)),
         ).catch(report),
+      onSuggest: isOn => void inTurn($, () => setSuggestions($, isOn)).catch(report),
       onChatAccess: isUnlocked =>
         void inTurn($, () => setChatAccess($, isUnlocked)).catch(report),
       onRefresh: () =>

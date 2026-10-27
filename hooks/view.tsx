@@ -17,6 +17,7 @@ export type PaneActions = {
   onRename: (name: string) => void
   onCreateNew: (name: string, base: 'on' | 'off') => void
   onChatAccess: (isUnlocked: boolean) => void
+  onSuggest: (isOn: boolean) => void
   onRefresh: () => void
   onProject: (path: string) => void
   onUnset: (level: Level) => void
@@ -34,11 +35,14 @@ export type PaneModel = {
   isOn: (item: Item) => boolean
   view: View
   isChatUnlocked: boolean
+  isSuggestOn: boolean
   hasTypeScale: boolean
   columns: number
   rows: number
   isDocked: boolean
 }
+
+export const suggestLabel = (isOn: boolean) => `Suggestions: ${isOn ? 'on' : 'off'}`
 
 export const chatAccessLabel = (isUnlocked: boolean) =>
   `Chat changes: ${isUnlocked ? 'unlocked' : 'locked'}`
@@ -189,6 +193,7 @@ export const drawPane = (
     root,
     projects,
     isChatUnlocked,
+    isSuggestOn,
     profiles,
     profile,
     applied,
@@ -435,6 +440,15 @@ export const drawPane = (
               dimColor
               label={chatAccessLabel(isChatUnlocked)}
               onPress={() => actions.onChatAccess(!isChatUnlocked)}
+            />
+          </Box>
+          <Box key="suggest-frame" {...FRAME}>
+            <Button
+              key="suggest"
+              plain
+              dimColor
+              label={suggestLabel(isSuggestOn)}
+              onPress={() => actions.onSuggest(!isSuggestOn)}
             />
           </Box>
           <Box key="refresh-frame" {...FRAME}>

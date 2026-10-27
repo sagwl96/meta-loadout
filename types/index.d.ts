@@ -102,6 +102,7 @@ declare module 'claude-code' {
       projectProfile: string
       isLoaded: boolean
       isChatUnlocked: boolean
+      isSuggestOn: boolean
       suggested: string[]
       seen: Item[]
       items: Item[]

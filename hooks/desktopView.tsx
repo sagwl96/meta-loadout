@@ -56,6 +56,7 @@ const LEVEL_HINTS = {
 const LOCK_ICONS = { locked: '🔒', unlocked: '🔓' } as const
 // Both emoji, so they draw at one size; each sits in a slot of one width.
 const REFRESH_ICON = '🔄'
+const SUGGEST_ICON = '💡'
 const ICON_SLOT = 6
 const BAR_WIDTH = 18
 type TextSize = 'caption' | 'footnote' | 'body' | 'heading' | 'title'
@@ -83,6 +84,7 @@ export const drawDesktopPane = (
     isOn,
     view,
     isChatUnlocked,
+    isSuggestOn,
     hasTypeScale,
   }: PaneModel,
   actions: PaneActions,
@@ -375,6 +377,7 @@ export const drawDesktopPane = (
                 undefined,
               ],
               ['Chat changes', isChatUnlocked ? 'Unlocked' : 'Locked', isChatUnlocked ? ACCENT : undefined],
+              ['Suggestions', isSuggestOn ? 'On' : 'Off', undefined],
             ].map(([label, value, color]) => (
               <Box key={`status:${label}`} flexDirection="column">
                 <Text {...type('caption', 'bold')} dimColor>
@@ -397,6 +400,15 @@ export const drawDesktopPane = (
             () => actions.onChatAccess(!isChatUnlocked),
             // unlocked is the state to notice: a filled accent button, not a second grey padlock
             isChatUnlocked,
+          )}
+          {iconButton(
+            'suggest',
+            SUGGEST_ICON,
+            isSuggestOn
+              ? 'Suggestions on: Claude offers what the profile turned off when you name it. Click to turn off.'
+              : 'Suggestions off. Click to turn on.',
+            () => actions.onSuggest(!isSuggestOn),
+            isSuggestOn,
           )}
           {iconButton('refresh', REFRESH_ICON, 'Refresh: read the harness again', actions.onRefresh)}
         </Box>

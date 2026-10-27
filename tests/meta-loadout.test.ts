@@ -1939,6 +1939,23 @@ describe('suggests what the profile turned off', () => {
     expect(seen[0]?.join(' ')).toContain('mcp__meta-loadout__profiles')
   })
 
+  test('says nothing once suggestions are off, from the command or the pane', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    harness(on, USER_SETTINGS, { contexts: seen })
+    await loadout($, 'set default ecc:plan off')
+    await loadout($, 'suggest off')
+
+    await submit($, 'make a plan')
+    const ui = await mountPane($, 'desktop')
+    expect(await ui.find({ type: 'Text', text: /Suggestions off\. Click to turn on\./ })).toBeDefined()
+    await ui.press({ key: 'suggest' })
+    await ui.unmount()
+    await submit($, 'make a plan')
+
+    expect(seen[0]).toBeUndefined()
+    expect(seen[1]?.join(' ')).toContain('ecc:plan (skill)')
+  })
+
   test('says nothing when nothing named is off', async ($, on) => {
     const seen: (readonly string[] | undefined)[] = []
     harness(on, USER_SETTINGS, { contexts: seen })

@@ -151,6 +151,7 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout list` | Lists the profiles |
 | `/meta-loadout show [<profile>]` | Lists what a profile changes, the active one without a name |
 | `/meta-loadout set <profile> <element> <on\|off>` | Turns one element on or off in a profile, by its name or id (as `status` and the pane show them) |
+| `/meta-loadout suggest <on\|off>` | Turns the suggestions about what a profile leaves out on or off |
 | `/meta-loadout lock` / `unlock` | Stops or allows Claude changing profiles when you ask it in chat |
 | `/meta-loadout use <profile> [chat\|project\|global]` | Switches profile, globally unless a level is given |
 | `/meta-loadout unset <chat\|project>` | Removes the chat or project profile |
@@ -177,7 +178,7 @@ If a message names a skill, agent or MCP server that the profile in effect turns
 - With chat changes **locked**, Claude gives you the command to run, such as `/meta-loadout set default skill:docs:pdf on`.
 - With chat changes **unlocked**, Claude turns it on for you once you agree.
 
-It is offered once per element per chat, and it works from the next message. Turning it on changes the profile itself, so every chat that uses the profile gets it.
+It is offered once per element per chat, and it works from the next message. Switch suggestions off or on with 💡 in the pane or `/meta-loadout suggest off` / `on`; the choice is shared by every chat. Turning it on changes the profile itself, so every chat that uses the profile gets it.
 
 ### Several chats at once
 
