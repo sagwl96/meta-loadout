@@ -162,25 +162,43 @@ export const drawDesktopPane = (
     )
 
   // How many are on, as a bar of one width everywhere; the words show on hover.
-  const progress = (key: string, onCount: number, total: number) =>
-    withTip(
-      key,
-      `${onCount} of ${total} on`,
-      // No border: the desktop pads a bordered Box well past one line, so the fill sat
-      // in a band in its middle. A track and a fill each one line of text tall match.
-      <Box key={key} position="relative" width={BAR_WIDTH} backgroundColor="subtle">
-        <Text> </Text>
+  // How many are on, as a bar of one width everywhere. The numbers show beside it, in
+  // the row, while the pointer is on it: an absolute tooltip was drawn behind the next card.
+  const progress = (key: string, onCount: number, total: number) => {
+    const scope = key.slice(0, 64)
+    // The desktop pads a bordered Box past one line unless told none, which left the
+    // fill a band in its middle; padding 0 keeps the round border, overflow its corners.
+
+    return (
+      <Box key={`tip:${key}`} flexDirection="row" gap={1} alignItems="center">
+        <Box display="none" hover={{ scope, display: 'flex' }}>
+          <Text {...type('footnote', 'semibold')}>{`${onCount} of ${total} on`}</Text>
+        </Box>
         <Box
-          position="absolute"
-          top={0}
-          left={0}
-          width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
-          backgroundColor={ACCENT}
+          key={key}
+          hover={{ scope }}
+          position="relative"
+          width={BAR_WIDTH}
+          borderStyle="round"
+          borderColor="promptBorder"
+          padding={0}
+          overflow="hidden"
+          backgroundColor="subtle"
         >
           <Text> </Text>
+          <Box
+            position="absolute"
+            top={0}
+            left={0}
+            width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
+            backgroundColor={ACCENT}
+          >
+            <Text> </Text>
+          </Box>
         </Box>
-      </Box>,
+      </Box>
     )
+  }
 
   const title = (label: string, hint?: string) => (
     <Box flexDirection="column">
