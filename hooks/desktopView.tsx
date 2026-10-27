@@ -166,9 +166,18 @@ export const drawDesktopPane = (
     withTip(
       key,
       `${onCount} of ${total} on`,
-      <Box key={key} {...CHIP} paddingX={0} width={BAR_WIDTH} borderColor="promptBorder">
+      <Box
+        key={key}
+        {...CHIP}
+        paddingX={0}
+        width={BAR_WIDTH}
+        alignItems="stretch"
+        overflow="hidden"
+        borderColor="promptBorder"
+      >
+        {/* the fill takes the bar's whole height; a height of 1 left a thin band in the middle */}
         <Box
-          height={1}
+          height="100%"
           width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
           backgroundColor={ACCENT}
         />
