@@ -175,12 +175,14 @@ export const drawDesktopPane = (
         overflow="hidden"
         borderColor="promptBorder"
       >
-        {/* the fill takes the bar's whole height; a height of 1 left a thin band in the middle */}
+        {/* a blank line of text gives the fill the bar's full row height; a fixed height
+            of 1 drew a thin band, and 100% resolved to nothing */}
         <Box
-          height="100%"
           width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
           backgroundColor={ACCENT}
-        />
+        >
+          <Text> </Text>
+        </Box>
       </Box>,
     )
 
