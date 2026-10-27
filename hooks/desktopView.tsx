@@ -58,6 +58,7 @@ const LOCK_ICONS = { locked: '🔒', unlocked: '🔓' } as const
 const REFRESH_ICON = '🔄'
 const SUGGEST_ICON = '💡'
 const ICON_SLOT = 6
+const ICON_ROWS = 3
 const BAR_WIDTH = 18
 type TextSize = 'caption' | 'footnote' | 'body' | 'heading' | 'title'
 type TextWeight = 'regular' | 'medium' | 'semibold' | 'bold'
@@ -127,20 +128,20 @@ export const drawDesktopPane = (
   )
 
   // Shows `tip` below `child` while the pointer is on it.
-  // `place` puts the words below `child` (an icon) or at its left on the same line (a bar,
-  // where below would sit under the next row).
+  // Shows `tip` at `at` (cells from `child`'s top right) while the pointer is on `child`.
+  // Buttons paint over a tooltip, so it must land clear of every other button.
   const withTip = (
     key: string,
     tip: string,
     child: JSX.Element,
-    place: 'below' | 'left' = 'below',
+    at: { top: number; right: number },
   ) => (
     <Box key={`tip:${key}`} position="relative">
       {child}
       <Box
         position="absolute"
-        top={place === 'below' ? 3 : 0}
-        right={place === 'below' ? 0 : BAR_WIDTH + 1}
+        top={at.top}
+        right={at.right}
         display="none"
         hover={{ display: 'flex' }}
         {...CHIP}
@@ -158,7 +159,8 @@ export const drawDesktopPane = (
     icon: string,
     tip: string,
     onPress: () => void,
-    isLit = false,
+    isLit: boolean,
+    below: number,
   ) =>
     withTip(
       key,
@@ -166,11 +168,10 @@ export const drawDesktopPane = (
       <Box width={ICON_SLOT} justifyContent="center">
         <Button key={key} variant={isLit ? 'primary' : 'secondary'} label={icon} onPress={onPress} />
       </Box>,
+      // under the whole column of icons, not under the next icon, which would cover it
+      { top: ICON_ROWS + below * (ICON_ROWS + 1), right: 0 },
     )
 
-  // How many are on, as a bar of one width everywhere; the words show on hover.
-  // How many are on, as a bar of one width everywhere. The numbers show beside it, in
-  // the row, while the pointer is on it: an absolute tooltip was drawn behind the next card.
   // How many are on, as a bar of one width everywhere; the numbers show on hover.
   // The desktop pads a bordered Box past one line unless told none, which left the
   // fill a band in its middle; padding 0 keeps the round border, overflow its corners.
@@ -199,7 +200,7 @@ export const drawDesktopPane = (
           <Text> </Text>
         </Box>
       </Box>,
-      'left',
+      { top: 0, right: BAR_WIDTH + 1 },
     )
 
   const title = (label: string, hint?: string) => (
@@ -427,6 +428,7 @@ export const drawDesktopPane = (
             () => actions.onChatAccess(!isChatUnlocked),
             // unlocked is the state to notice: a filled accent button, not a second grey padlock
             isChatUnlocked,
+            2,
           )}
           {iconButton(
             'suggest',
@@ -436,8 +438,16 @@ export const drawDesktopPane = (
               : 'Suggestions off. Click to turn on.',
             () => actions.onSuggest(!isSuggestOn),
             isSuggestOn,
+            1,
           )}
-          {iconButton('refresh', REFRESH_ICON, 'Refresh: read the harness again', actions.onRefresh)}
+          {iconButton(
+            'refresh',
+            REFRESH_ICON,
+            'Refresh: read the harness again',
+            actions.onRefresh,
+            false,
+            0,
+          )}
         </Box>
       </Box>
       <Box key="levels" flexDirection="column" {...CARD}>
