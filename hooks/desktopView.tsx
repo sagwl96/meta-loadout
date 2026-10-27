@@ -127,13 +127,20 @@ export const drawDesktopPane = (
   )
 
   // Shows `tip` below `child` while the pointer is on it.
-  const withTip = (key: string, tip: string, child: JSX.Element) => (
+  // `place` puts the words below `child` (an icon) or at its left on the same line (a bar,
+  // where below would sit under the next row).
+  const withTip = (
+    key: string,
+    tip: string,
+    child: JSX.Element,
+    place: 'below' | 'left' = 'below',
+  ) => (
     <Box key={`tip:${key}`} position="relative">
       {child}
       <Box
         position="absolute"
-        top={3}
-        right={0}
+        top={place === 'below' ? 3 : 0}
+        right={place === 'below' ? 0 : BAR_WIDTH + 1}
         display="none"
         hover={{ display: 'flex' }}
         {...CHIP}
@@ -164,41 +171,36 @@ export const drawDesktopPane = (
   // How many are on, as a bar of one width everywhere; the words show on hover.
   // How many are on, as a bar of one width everywhere. The numbers show beside it, in
   // the row, while the pointer is on it: an absolute tooltip was drawn behind the next card.
-  const progress = (key: string, onCount: number, total: number) => {
-    const scope = key.slice(0, 64)
-    // The desktop pads a bordered Box past one line unless told none, which left the
-    // fill a band in its middle; padding 0 keeps the round border, overflow its corners.
-
-    return (
-      <Box key={`tip:${key}`} flexDirection="row" gap={1} alignItems="center">
-        <Box display="none" hover={{ scope, display: 'flex' }}>
-          <Text {...type('footnote', 'semibold')}>{`${onCount} of ${total} on`}</Text>
-        </Box>
+  // How many are on, as a bar of one width everywhere; the numbers show on hover.
+  // The desktop pads a bordered Box past one line unless told none, which left the
+  // fill a band in its middle; padding 0 keeps the round border, overflow its corners.
+  const progress = (key: string, onCount: number, total: number) =>
+    withTip(
+      key,
+      `${onCount} of ${total} on`,
+      <Box
+        key={key}
+        position="relative"
+        width={BAR_WIDTH}
+        borderStyle="round"
+        borderColor="promptBorder"
+        padding={0}
+        overflow="hidden"
+        backgroundColor="subtle"
+      >
+        <Text> </Text>
         <Box
-          key={key}
-          hover={{ scope }}
-          position="relative"
-          width={BAR_WIDTH}
-          borderStyle="round"
-          borderColor="promptBorder"
-          padding={0}
-          overflow="hidden"
-          backgroundColor="subtle"
+          position="absolute"
+          top={0}
+          left={0}
+          width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
+          backgroundColor={ACCENT}
         >
           <Text> </Text>
-          <Box
-            position="absolute"
-            top={0}
-            left={0}
-            width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
-            backgroundColor={ACCENT}
-          >
-            <Text> </Text>
-          </Box>
         </Box>
-      </Box>
+      </Box>,
+      'left',
     )
-  }
 
   const title = (label: string, hint?: string) => (
     <Box flexDirection="column">
