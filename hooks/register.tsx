@@ -40,6 +40,7 @@ import {
   fallbackProfile,
   findProfile,
   isEnabled,
+  offMentions,
   isFixedProfile,
   isOnIn,
   isShownOn,
@@ -147,6 +148,7 @@ const activeAtom = atom({ plugin: 'meta-loadout', key: 'active' } as const, DEFA
 const chatAtom = atom({ plugin: 'meta-loadout', key: 'chatProfile' } as const, UNBOUND)
 const projectAtom = atom({ plugin: 'meta-loadout', key: 'projectProfile' } as const, UNBOUND)
 const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
+const suggestedAtom = atom({ plugin: 'meta-loadout', key: 'suggested' } as const, [] as string[])
 const chatUnlockedAtom = atom({ plugin: 'meta-loadout', key: 'isChatUnlocked' } as const, false)
 const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
@@ -955,6 +957,29 @@ const hasTypeScale = async ($: EngineInterface) => {
   }
 }
 
+// Offers, once per chat each, what the person named that the profile turns off.
+// It changes nothing: the model asks, and the person or an unlocked chat switches it on.
+const suggestionFor = async ($: EngineInterface, text: string) => {
+  const profile = await activeProfile($)
+  const found = offMentions(await read($, itemsAtom), profile, text, await read($, suggestedAtom))
+  if (found.length === 0) return undefined
+  await update($, suggestedAtom, ids => [...ids, ...found.map(item => item.id)])
+  const isUnlocked = await read($, chatUnlockedAtom)
+  const names = found.map(item => `${item.name} (${item.kind})`).join(', ')
+  $.ui.toast(`meta-loadout: ${names} ${found.length === 1 ? 'is' : 'are'} off in "${profile.name}".`)
+  const howTo = found
+    .map(item => `/meta-loadout set ${profile.name} ${item.id} on`)
+    .join(', ')
+
+  return [
+    `meta-loadout: the user's message names ${names}, turned off in their active profile "${profile.name}".`,
+    'Only if the request needs one of them, tell the user it is off and ask whether to turn it on; otherwise ignore this note.',
+    isUnlocked
+      ? `Once they agree, turn it on with the ${TOOL_ID} tool (command "set ${profile.name} <id> on"; ids: ${found.map(item => item.id).join(', ')}). It is usable from the next message.`
+      : `Chat changes are locked, so the user turns it on: ${howTo}.`,
+  ].join(' ')
+}
+
 const openPane = async ($: EngineInterface) => {
   await syncFromStore($)
   await refresh($)
@@ -1197,15 +1222,18 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    let note: string | undefined
     try {
       await ensureLoaded($)
       await syncFromStore($)
       await refresh($)
+      if (e.command === undefined && e.isMeta !== true && PERSON_ORIGINS.includes(e.origin.kind))
+        note = await suggestionFor($, e.text)
     } catch (error) {
       $.ui.log(`meta-loadout could not refresh the harness: ${messageOf(error)}`)
     }
 
-    return next(e)
+    return next(note === undefined ? e : { ...e, context: [...(e.context ?? []), note] })
   }).catch(($, e, next) => next(e))
 
   on('prompt.context', async ($, e, next) => {

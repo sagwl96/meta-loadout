@@ -1,6 +1,6 @@
 {
   "name": "meta-loadout",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "author": { "name": "sagwl96" },
   "description": "Harness manager with a desktop GUI: switchable profiles, scope provenance and on/off for every harness element",
   "homepage": "https://github.com/sagwl96/meta-loadout",

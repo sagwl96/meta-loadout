@@ -170,6 +170,15 @@ You choose how profiles may be changed:
 
 Switch it with `/meta-loadout unlock` and `/meta-loadout lock`, or the **Chat changes** button in the pane. The setting is shared by every chat. Only you can switch it: Claude cannot lock or unlock it, and a `/meta-loadout` command you did not type (another session's, a model-written one) can only read.
 
+### When a profile leaves something out
+
+If a message names a skill, agent or MCP server that the profile in effect turns off (for example "merge these pdf files" while the `pdf` skill is off), meta-loadout shows a toast and tells Claude. Claude mentions it only when the request needs it, and asks you before anything changes:
+
+- With chat changes **locked**, Claude gives you the command to run, such as `/meta-loadout set default skill:docs:pdf on`.
+- With chat changes **unlocked**, Claude turns it on for you once you agree.
+
+It is offered once per element per chat, and it works from the next message. Turning it on changes the profile itself, so every chat that uses the profile gets it.
+
 ### Several chats at once
 
 ![A profile made in one chat appears in another open chat's pane within seconds](assets/sync.gif)

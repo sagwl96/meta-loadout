@@ -88,6 +88,7 @@ type World = {
   firstName?: string
   store?: Readonly<Record<string, unknown>>
   shared?: Map<string, unknown>
+  contexts?: (readonly string[] | undefined)[]
   commands?: readonly (
     | { name: string; description: string; source: 'plugin'; plugin: string }
     | { name: string; description: string; source: 'user' }
@@ -124,7 +125,11 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
   mock.env(on, { HOME })
   on('session.root', () => ({ value: place.root }))
   on('session.id', () => ({ value: place.chat }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.submit', ($, e) => {
+    world.contexts?.push(e.context)
+
+    return { text: e.text }
+  })
   on('settings.read', ($, e) => ({
     value: e.source === 'policy' ? (world.policy ?? {}) : {},
   }))
@@ -1903,4 +1908,43 @@ test('the command file the menu lists before a first message runs the same comma
   const ran = await $.command.run({ ...TYPED_BY_PERSON, command: 'meta-loadout:open', args: 'list' })
 
   expect(ran.text).toContain('* default')
+})
+
+describe('suggests what the profile turned off', () => {
+  const submit = ($: Engine, text: string) =>
+    $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+
+
+  test('notes an off skill the person names, once per chat, and how to turn it on', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    harness(on, USER_SETTINGS, { contexts: seen })
+    await loadout($, 'set default ecc:plan off')
+
+    await submit($, 'make a plan for the refactor')
+    await submit($, 'and another plan')
+
+    expect(seen[0]?.join(' ')).toContain('ecc:plan (skill), turned off in their active profile "default"')
+    expect(seen[0]?.join(' ')).toContain('/meta-loadout set default skill:ecc:plan on')
+    expect(seen[1]).toBeUndefined()
+  })
+
+  test('tells Claude to use its tool when chat changes are unlocked', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    harness(on, USER_SETTINGS, { contexts: seen })
+    await loadout($, 'set default ecc:plan off')
+    await loadout($, 'unlock')
+
+    await submit($, 'plan it')
+
+    expect(seen[0]?.join(' ')).toContain('mcp__meta-loadout__profiles')
+  })
+
+  test('says nothing when nothing named is off', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    harness(on, USER_SETTINGS, { contexts: seen })
+
+    await submit($, 'make a plan')
+
+    expect(seen[0]).toBeUndefined()
+  })
 })

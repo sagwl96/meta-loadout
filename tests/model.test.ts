@@ -8,6 +8,7 @@ import {
   findProfile,
   isEnabled,
   isValidProfileName,
+  offMentions,
   nameProblem,
   removeProfile,
   renameProfile,
@@ -233,5 +234,28 @@ describe('matchesQuery', () => {
     expect(matchesQuery(mcp, 'mcp')).toBe(true)
     expect(matchesQuery(SKILL, 'mcp')).toBe(false)
     expect(matchesQuery(SKILL, KIND_LABELS.skill.toUpperCase())).toBe(true)
+  })
+})
+
+describe('offMentions', () => {
+  const PDF: Item = { ...SKILL, id: 'skill:docs:pdf', name: 'docs:pdf' }
+  const offPdf = { name: 'p', base: 'on', overrides: { [PDF.id]: false } } as const
+
+  test('finds an off skill by the name after its namespace, as a whole word', () => {
+    expect(offMentions([PDF, SKILL], offPdf, 'Merge these PDF files', [])).toEqual([PDF])
+    expect(offMentions([PDF], offPdf, 'read the pdfs', [])).toEqual([])
+  })
+
+  test('skips what is on, locked, offered before, or not a skill, agent or MCP server', () => {
+    expect(offMentions([PDF], { ...offPdf, overrides: {} }, 'pdf', [])).toEqual([])
+    expect(offMentions([{ ...PDF, isLocked: true }], offPdf, 'pdf', [])).toEqual([])
+    expect(offMentions([PDF], offPdf, 'pdf', [PDF.id])).toEqual([])
+    expect(offMentions([{ ...PDF, kind: 'plugin' }], offPdf, 'pdf', [])).toEqual([])
+  })
+
+  test('ignores names shorter than three letters', () => {
+    const DO: Item = { ...SKILL, id: 'skill:x:do', name: 'x:do' }
+
+    expect(offMentions([DO], { name: 'p', base: 'off', overrides: {} }, 'do it', [])).toEqual([])
   })
 })

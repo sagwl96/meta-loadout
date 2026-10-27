@@ -224,3 +224,41 @@ export const withoutName = (
   name: string,
 ): Record<string, string> =>
   Object.fromEntries(Object.entries(map).filter(([, one]) => one !== name))
+
+const SUGGESTED_KINDS: readonly Kind[] = ['skill', 'agent', 'mcp']
+const MIN_WORD_LENGTH = 3
+const MAX_SUGGESTIONS = 3
+const WORD = /[a-z0-9][a-z0-9_-]*/g
+
+// The part after a plugin's namespace: `claude-scientific-writer:pdf` is `pdf`.
+const shortNameOf = (name: string) => name.slice(name.lastIndexOf(':') + 1).toLowerCase()
+
+// Skills, agents and MCP servers the profile turns off whose name the person typed:
+// what a request may need that the profile left out. `already` is what was offered before.
+export const offMentions = (
+  items: readonly Item[],
+  profile: Profile,
+  text: string,
+  already: readonly string[],
+): Item[] => {
+  const words = new Set(text.toLowerCase().match(WORD) ?? [])
+  const lowered = text.toLowerCase()
+
+  return items
+    .filter(
+      item =>
+        SUGGESTED_KINDS.includes(item.kind) &&
+        !item.isLocked &&
+        !already.includes(item.id) &&
+        !isEnabled(profile, item),
+    )
+    .filter(item => {
+      const short = shortNameOf(item.name)
+
+      return (
+        (short.length >= MIN_WORD_LENGTH && words.has(short)) ||
+        (item.name.includes(':') && lowered.includes(item.name.toLowerCase()))
+      )
+    })
+    .slice(0, MAX_SUGGESTIONS)
+}
