@@ -129,7 +129,6 @@ export const drawDesktopPane = (
 
   // Shows `tip` below `child` while the pointer is on it.
   // Shows `tip` at `at` (cells from `child`'s top right) while the pointer is on `child`.
-  // Buttons paint over a tooltip, so it must land clear of every other button.
   const withTip = (
     key: string,
     tip: string,
@@ -160,7 +159,6 @@ export const drawDesktopPane = (
     tip: string,
     onPress: () => void,
     isLit: boolean,
-    below: number,
   ) =>
     withTip(
       key,
@@ -168,8 +166,7 @@ export const drawDesktopPane = (
       <Box width={ICON_SLOT} justifyContent="center">
         <Button key={key} variant={isLit ? 'primary' : 'secondary'} label={icon} onPress={onPress} />
       </Box>,
-      // under the whole column of icons, not under the next icon, which would cover it
-      { top: ICON_ROWS + below * (ICON_ROWS + 1), right: 0 },
+      { top: ICON_ROWS, right: 0 },
     )
 
   // How many are on, as a bar of one width everywhere; the numbers show on hover.
@@ -418,17 +415,16 @@ export const drawDesktopPane = (
             ))}
           </Box>
         </Box>
-        <Box flexDirection="column" gap={1}>
+        {/* Each icon's wrapper is positioned, so a later one paints over an earlier one's
+            tooltip. Written bottom icon first and drawn reversed, each tooltip paints over
+            the icons below it. */}
+        <Box flexDirection="column-reverse" gap={1}>
           {iconButton(
-            'chat-access',
-            isChatUnlocked ? LOCK_ICONS.unlocked : LOCK_ICONS.locked,
-            isChatUnlocked
-              ? 'Chat changes unlocked: Claude can change profiles. Click to lock.'
-              : 'Chat changes locked: only you change profiles. Click to unlock.',
-            () => actions.onChatAccess(!isChatUnlocked),
-            // unlocked is the state to notice: a filled accent button, not a second grey padlock
-            isChatUnlocked,
-            2,
+            'refresh',
+            REFRESH_ICON,
+            'Refresh: read the harness again',
+            actions.onRefresh,
+            false,
           )}
           {iconButton(
             'suggest',
@@ -438,15 +434,16 @@ export const drawDesktopPane = (
               : 'Suggestions off. Click to turn on.',
             () => actions.onSuggest(!isSuggestOn),
             isSuggestOn,
-            1,
           )}
           {iconButton(
-            'refresh',
-            REFRESH_ICON,
-            'Refresh: read the harness again',
-            actions.onRefresh,
-            false,
-            0,
+            'chat-access',
+            isChatUnlocked ? LOCK_ICONS.unlocked : LOCK_ICONS.locked,
+            isChatUnlocked
+              ? 'Chat changes unlocked: Claude can change profiles. Click to lock.'
+              : 'Chat changes locked: only you change profiles. Click to unlock.',
+            () => actions.onChatAccess(!isChatUnlocked),
+            // unlocked is the state to notice: a filled accent button, not a second grey padlock
+            isChatUnlocked,
           )}
         </Box>
       </Box>
