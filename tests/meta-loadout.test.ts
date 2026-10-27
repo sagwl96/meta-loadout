@@ -1896,3 +1896,11 @@ test('draws each count as a bar with its words in a tooltip', async ($, on) => {
   expect(await ui.find({ key: 'count:skill' })).toBeDefined()
   await ui.unmount()
 })
+
+test('the command file the menu lists before a first message runs the same command', async ($, on) => {
+  harness(on)
+
+  const ran = await $.command.run({ ...TYPED_BY_PERSON, command: 'meta-loadout:open', args: 'list' })
+
+  expect(ran.text).toContain('* default')
+})

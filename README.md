@@ -146,6 +146,7 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | Command | Does |
 |---|---|
 | `/meta-loadout` | Opens the pane |
+| `/meta-loadout:open` | The same command. In the desktop app, a new chat lists only this name until its first message; after that it lists `/meta-loadout`. |
 | `/meta-loadout status` | Lists what is off in the active profile |
 | `/meta-loadout list` | Lists the profiles |
 | `/meta-loadout show [<profile>]` | Lists what a profile changes, the active one without a name |

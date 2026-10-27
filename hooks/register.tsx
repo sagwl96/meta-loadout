@@ -98,6 +98,7 @@ const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const STORE_POLL_MS = 3000
 const TOOL_NAME = 'profiles'
 const TOOL_ID = `mcp__${PLUGIN}__${TOOL_NAME}`
+const FILE_COMMAND = `${PLUGIN}:open`
 const ARGUMENT_HINT =
   '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | project [<folder>]]'
 const USAGE = `Usage: /meta-loadout ${ARGUMENT_HINT}`
@@ -1170,6 +1171,21 @@ export const register: Register = on => {
       return { text: `meta-loadout failed: ${messageOf(error)}` }
     }
   })
+
+  // commands/open.md lets the app list the command before a chat's first message,
+  // when no session has run register yet; once one has, /meta-loadout serves it.
+  on('command.run', { command: FILE_COMMAND }, async ($, e) => {
+    try {
+      return { text: await runCommand($, e.args, callerOf(e.origin)) }
+    } catch (error) {
+      return { text: `meta-loadout failed: ${messageOf(error)}` }
+    }
+  })
+
+  on('command.describe', { command: FILE_COMMAND }, async ($, e, next) => ({
+    ...(await next(e)),
+    isHidden: true,
+  }))
 
   on('tool.call', { tool: TOOL_ID }, async ($, e) => {
     const { command } = e as { command?: unknown }
