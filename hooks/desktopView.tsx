@@ -166,18 +166,14 @@ export const drawDesktopPane = (
     withTip(
       key,
       `${onCount} of ${total} on`,
-      <Box
-        key={key}
-        {...CHIP}
-        paddingX={0}
-        width={BAR_WIDTH}
-        alignItems="stretch"
-        overflow="hidden"
-        borderColor="promptBorder"
-      >
-        {/* a blank line of text gives the fill the bar's full row height; a fixed height
-            of 1 drew a thin band, and 100% resolved to nothing */}
+      // No border: the desktop pads a bordered Box well past one line, so the fill sat
+      // in a band in its middle. A track and a fill each one line of text tall match.
+      <Box key={key} position="relative" width={BAR_WIDTH} backgroundColor="subtle">
+        <Text> </Text>
         <Box
+          position="absolute"
+          top={0}
+          left={0}
           width={`${total === 0 ? 0 : Math.round((onCount / total) * 100)}%`}
           backgroundColor={ACCENT}
         >
