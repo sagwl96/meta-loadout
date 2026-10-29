@@ -89,6 +89,7 @@ type World = {
   store?: Readonly<Record<string, unknown>>
   shared?: Map<string, unknown>
   contexts?: (readonly string[] | undefined)[]
+  prompts?: string[]
   commands?: readonly (
     | { name: string; description: string; source: 'plugin'; plugin: string }
     | { name: string; description: string; source: 'user' }
@@ -127,6 +128,7 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
   on('session.id', () => ({ value: place.chat }))
   on('prompt.submit', ($, e) => {
     world.contexts?.push(e.context)
+    world.prompts?.push(e.text)
 
     return { text: e.text }
   })
@@ -1963,5 +1965,103 @@ describe('suggests what the profile turned off', () => {
     await submit($, 'make a plan')
 
     expect(seen[0]).toBeUndefined()
+  })
+})
+
+describe('setup', () => {
+  // the canary check runs after the turn's hook returns
+  const settle = async () => {
+    for (let tick = 0; tick < 200; tick += 1) await Promise.resolve()
+  }
+  const submit = ($: Engine, text: string) =>
+    $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+  const answerTurns = (on: On) => on('turn.complete', ($, e) => ({ text: e.answer }))
+  const endTurn = ($: Engine) =>
+    $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+
+  test('makes a lean project profile, applies it to the project and plants a canary', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    const files = harness(on, USER_SETTINGS, {
+      contexts: seen,
+      files: { [`${ROOT}/README.md`]: 'A web app' },
+      commands: [{ name: 'other', description: 'Other', source: 'user' }],
+    })
+    const asked: string[] = []
+    on('model.complete', ($, e) => {
+      asked.push(e.prompt)
+
+      return { value: { isAnswered: true, text: '["skill:other"]', usage: {} } } as never
+    })
+    on('session.messages', () => ({ value: [] }) as never)
+
+    const answer = await loadout($, 'setup')
+    await submit($, 'hello')
+
+    expect(asked[0]).toContain('A web app')
+    expect(asked[0]).toContain('skill:ecc:plan')
+    expect(answer.text).toContain('Made profile "app": 1 of')
+    expect(answer.text).toContain('Profile "app" is active for this project')
+    expect((await loadout($, 'show app')).text).toMatch(/off.*ecc:plan/s)
+    expect(seen[0]?.join(' ')).toMatch(/meta-loadout canary: the code word for this chat is "[a-z]+-\d{4}"/)
+    expect(files.has(USER_SETTINGS_PATH)).toBe(true)
+  })
+
+  test('reuses an existing project profile without asking the model', async ($, on) => {
+    harness(on)
+    let calls = 0
+    on('model.complete', () => {
+      calls += 1
+
+      return { value: { isAnswered: true, text: '[]', usage: {} } } as never
+    })
+    await loadout($, 'new app on')
+
+    const answer = await loadout($, 'setup')
+
+    expect(calls).toBe(0)
+    expect(answer.text).not.toContain('Made profile')
+    expect(answer.text).toContain('Profile "app" is active for this project')
+  })
+
+  test('hands off to a new chat once when the canary is forgotten', async ($, on) => {
+    const prompts: string[] = []
+    harness(on, USER_SETTINGS, { prompts })
+    answerTurns(on)
+    on('model.complete', () => ({ value: { isAnswered: true, text: '[]', usage: {} } }) as never)
+    on('session.messages', () => ({ value: [] }) as never)
+    let recall = ''
+    on('model.fork', () => ({ value: { isAnswered: true, text: recall, usage: {} } }) as never)
+    await loadout($, 'setup')
+    await submit($, 'hello')
+
+    recall = 'unknown'
+    await endTurn($)
+    await settle()
+    await endTurn($)
+    await settle()
+
+    expect(prompts.filter(text => text.includes('context canary failed'))).toHaveLength(1)
+    expect((await loadout($, 'status')).text).toContain('Canary: failed')
+  })
+
+  test('leaves the chat alone while the canary is remembered', async ($, on) => {
+    const seen: (readonly string[] | undefined)[] = []
+    const prompts: string[] = []
+    harness(on, USER_SETTINGS, { contexts: seen, prompts })
+    answerTurns(on)
+    on('model.complete', () => ({ value: { isAnswered: true, text: '[]', usage: {} } }) as never)
+    on('session.messages', () => ({ value: [] }) as never)
+    let word = ''
+    on('model.fork', () => ({ value: { isAnswered: true, text: word, usage: {} } }) as never)
+    await loadout($, 'setup')
+    await submit($, 'hello')
+    word = /"([a-z]+-\d{4})"/.exec(seen.flat().join(' '))?.[1] ?? 'missing'
+
+    await endTurn($)
+    await settle()
+
+    expect(word).not.toBe('missing')
+    expect(prompts.some(text => text.includes('context canary failed'))).toBe(false)
+    expect((await loadout($, 'status')).text).toContain('Canary: on')
   })
 })

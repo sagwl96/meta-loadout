@@ -159,6 +159,7 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout rename <profile> <new name>` | Renames a profile |
 | `/meta-loadout delete <profile>` | Deletes a profile |
 | `/meta-loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
+| `/meta-loadout setup` | Makes a profile for this project if it has none, applies it to the project, and turns on its context canary |
 
 ### Chat lock
 
@@ -179,6 +180,15 @@ If a message names a skill, agent or MCP server that the profile in effect turns
 - With chat changes **unlocked**, Claude turns it on for you once you agree.
 
 It is offered once per element per chat, and it works from the next message. Switch suggestions off or on with 💡 in the pane or `/meta-loadout suggest off` / `on`; the choice is shared by every chat. Turning it on changes the profile itself, so every chat that uses the profile gets it.
+
+### Project setup and the context canary
+
+🧰 in the desktop pane, **Setup** in the terminal pane, or `/meta-loadout setup`:
+
+1. **Profile.** If no profile is named after the project folder, Haiku reads the folder (its top level, README, CLAUDE.md and package manifest) and picks the skills, agents and MCP servers worth keeping. The new profile turns the rest off and leaves everything else as it is. It is applied to the project; an existing profile of that name is applied as it is.
+2. **Canary.** The project gets a code word. Each chat in it is given the word with its first message (again after `/clear`). After every answer, meta-loadout asks a tool-less fork of the chat for the word; the fork is served from the prompt cache. When the chat can no longer recall it, its early context is going, so meta-loadout asks Claude to write a handoff brief and start a fresh session with it (in the desktop app; elsewhere Claude shows the brief). This happens once per chat. `/meta-loadout status` shows the canary's state.
+
+A compaction that drops the word counts as a failure too.
 
 ### Several chats at once
 

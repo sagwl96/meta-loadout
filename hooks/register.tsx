@@ -71,6 +71,18 @@ import {
   withSessionFiles,
 } from './project'
 import { isObject, isSoundStashedItem } from './settingsEdit'
+import {
+  CANARY_QUESTION,
+  HANDOFF_PROMPT,
+  candidatesOf,
+  canaryPlant,
+  isRecalled,
+  leanProfile,
+  newCanaryWord,
+  parsePicked,
+  pickPrompt,
+  profileNameFor,
+} from './setup'
 import { drawDesktopPane } from './desktopView'
 import { drawBand, drawPane, menuKeyOf } from './view'
 import type { PaneActions, PaneModel } from './view'
@@ -94,6 +106,13 @@ const LOCKED_SOURCES = [
 ] as const
 const CHAT_ACCESS_KEY = 'chatUnlocked'
 const SUGGEST_KEY = 'suggestOff'
+const CANARIES_KEY = 'canaries'
+const PICK_MODEL = 'haiku'
+const PICK_TIMEOUT_MS = 90_000
+const PICK_MAX_TOKENS = 4000
+const SUMMARY_FILES = ['README.md', 'CLAUDE.md', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod']
+const SUMMARY_CHARS = 2000
+const MAX_LISTED = 80
 const READ_ONLY_VERBS = ['', 'list', 'status', 'show']
 const LOCK_VERBS = ['lock', 'unlock']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
@@ -102,7 +121,7 @@ const TOOL_NAME = 'profiles'
 const TOOL_ID = `mcp__${PLUGIN}__${TOOL_NAME}`
 const FILE_COMMAND = `${PLUGIN}:open`
 const ARGUMENT_HINT =
-  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | suggest <on|off> | project [<folder>]]'
+  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | suggest <on|off> | project [<folder>] | setup]'
 const USAGE = `Usage: /meta-loadout ${ARGUMENT_HINT}`
 const TOOL_DESCRIPTION =
   "Reads or changes the user's meta-loadout harness profiles (which skills, MCP servers, plugins, rules and settings are on). `command` takes the words of /meta-loadout: list, status, show [<profile>], use <profile> [chat|project|global], unset <chat|project>, new <profile> [on|off], set <profile> <element> <on|off>, rename <profile> <new name>, delete <profile>. Reading always works; changes work only while the user has unlocked chat changes, and only the user can lock or unlock them."
@@ -151,6 +170,8 @@ const projectAtom = atom({ plugin: 'meta-loadout', key: 'projectProfile' } as co
 const loadedAtom = atom({ plugin: 'meta-loadout', key: 'isLoaded' } as const, false)
 const suggestedAtom = atom({ plugin: 'meta-loadout', key: 'suggested' } as const, [] as string[])
 const suggestOnAtom = atom({ plugin: 'meta-loadout', key: 'isSuggestOn' } as const, true)
+const canaryPlantedAtom = atom({ plugin: 'meta-loadout', key: 'canaryPlanted' } as const, false)
+const canaryTrippedAtom = atom({ plugin: 'meta-loadout', key: 'canaryTripped' } as const, false)
 const chatUnlockedAtom = atom({ plugin: 'meta-loadout', key: 'isChatUnlocked' } as const, false)
 const seenAtom = atom({ plugin: 'meta-loadout', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'meta-loadout', key: 'items' } as const, NO_ITEMS)
@@ -1029,7 +1050,7 @@ const status = async ($: EngineInterface) => {
   return [
     `Profile "${profile.name}"${level === 'global' ? '' : ` (${level})`}: ${off.length} of ${items.length} harness elements off.`,
     ...(level === 'global' ? [] : [`  ${bindingsLine(bindings)}`]),
-    `  Chat changes: ${(await read($, chatUnlockedAtom)) ? 'unlocked' : 'locked'} · Suggestions: ${(await read($, suggestOnAtom)) ? 'on' : 'off'}`,
+    `  Chat changes: ${(await read($, chatUnlockedAtom)) ? 'unlocked' : 'locked'} · Suggestions: ${(await read($, suggestOnAtom)) ? 'on' : 'off'} · Canary: ${(await canaryWord($)) === undefined ? 'off (run setup)' : (await read($, canaryTrippedAtom)) ? 'failed' : 'on'}`,
     ...off.map(item => `  off  ${item.kind}  ${item.name}  [${item.scope}]`),
   ].join('\n')
 }
@@ -1117,6 +1138,83 @@ const setSuggestions = async ($: EngineInterface, isOn: boolean) => {
   )
 }
 
+const projectSummary = async ($: EngineInterface, root: string) => {
+  const listed = (await $.fs.list(root))
+    .slice(0, MAX_LISTED)
+    .map(entry => `${entry.name}${entry.kind === 'dir' ? '/' : ''}`)
+  const files = await Promise.all(
+    SUMMARY_FILES.map(async name =>
+      (await $.fs.exists(`${root}/${name}`))
+        ? `--- ${name}\n${(await $.fs.read(`${root}/${name}`)).slice(0, SUMMARY_CHARS)}`
+        : '',
+    ),
+  )
+
+  return [`Folder: ${root}`, `Top level: ${listed.join(', ')}`, ...files.filter(one => one !== '')].join('\n')
+}
+
+// Canary words fit the profile-name pattern bindingMapOf keeps.
+const storedCanaries = async ($: EngineInterface) => bindingMapOf(await $.store.get(CANARIES_KEY))
+
+const canaryWord = async ($: EngineInterface) =>
+  (await storedCanaries($))[projectKeyOf(await $.session.root())]
+
+// Makes this project's profile when it has none (the model picks the skills, agents and
+// MCP servers worth keeping), applies it to the project, and gives the project a canary.
+const setupProject = async ($: EngineInterface) => {
+  const root = projectKeyOf(await $.session.root())
+  const name = profileNameFor(root)
+  let made = ''
+  if (!(await profilesOf($)).some(profile => profile.name === name)) {
+    const candidates = candidatesOf(await refresh($))
+    await say($, `Reading ${root} to pick its skills...`)
+    const reply = await $.model.complete({
+      model: PICK_MODEL,
+      prompt: pickPrompt(await projectSummary($, root), candidates),
+      maxTokens: PICK_MAX_TOKENS,
+      effort: 'low',
+      timeoutMs: PICK_TIMEOUT_MS,
+    })
+    if (!reply.isAnswered)
+      return say($, `Setup could not ask the model (${reply.reason}); nothing was changed.`)
+    const picked = parsePicked(reply.text, candidates)
+    await saveProfiles($, stored => upsertProfile(stored, leanProfile(name, candidates, picked)))
+    made = `Made profile "${name}": ${picked.length} of ${candidates.length} skills, agents and MCP servers on. `
+  }
+  const canaries = await storedCanaries($)
+  if (canaries[root] === undefined)
+    await $.store.set(CANARIES_KEY, withBinding(canaries, root, newCanaryWord()))
+  const switched = await switchProfile($, name, 'project')
+
+  return say($, `${made}${switched} The context canary is on for this project.`)
+}
+
+// Planted in a chat's first message (and again after /clear), so it sits where a long
+// context forgets first.
+const canaryNote = async ($: EngineInterface) => {
+  const word = await canaryWord($)
+  if (word === undefined) return undefined
+  if ((await read($, canaryPlantedAtom)) && (await $.session.messages()).length > 0)
+    return undefined
+  await update($, canaryPlantedAtom, () => true)
+  await update($, canaryTrippedAtom, () => false)
+
+  return canaryPlant(word)
+}
+
+// A tool-less fork of this chat, served from its cache, asks for the code word; a chat
+// that lost it is handed off to a new one, once.
+const checkCanary = async ($: EngineInterface) => {
+  if (!(await read($, canaryPlantedAtom)) || (await read($, canaryTrippedAtom))) return
+  const word = await canaryWord($)
+  if (word === undefined) return
+  const reply = await $.model.fork({ prompt: CANARY_QUESTION })
+  if (!reply.isAnswered || isRecalled(reply.text, word)) return
+  await update($, canaryTrippedAtom, () => true)
+  $.ui.toast('meta-loadout: the context canary failed; handing off to a new chat.')
+  await $.prompt.submit({ text: HANDOFF_PROMPT })
+}
+
 // 'person' typed it at the prompt, 'claude' called the tool, 'other' is any other
 // origin (a peer session, a model-authored command): it may only read.
 type Caller = 'person' | 'claude' | 'other'
@@ -1145,6 +1243,7 @@ const runCommand = async ($: EngineInterface, args: string, caller: Caller) => {
   if (verb === 'suggest' && (name === 'on' || name === 'off'))
     return inTurn($, () => setSuggestions($, name === 'on'))
   if (verb === 'project') return showProject($, name)
+  if (verb === 'setup') return inTurn($, () => setupProject($))
   const switchWord = words.at(-1)
   if (verb === 'set' && words.length >= 4 && (switchWord === 'on' || switchWord === 'off'))
     return inTurn($, () =>
@@ -1242,19 +1341,31 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    let note: string | undefined
+    const notes: string[] = []
     try {
       await ensureLoaded($)
       await syncFromStore($)
       await refresh($)
       if (e.command === undefined && e.isMeta !== true && PERSON_ORIGINS.includes(e.origin.kind))
-        note = await suggestionFor($, e.text)
+        notes.push(...[await canaryNote($), await suggestionFor($, e.text)].filter(
+          (note): note is string => note !== undefined,
+        ))
     } catch (error) {
       $.ui.log(`meta-loadout could not refresh the harness: ${messageOf(error)}`)
     }
 
-    return next(note === undefined ? e : { ...e, context: [...(e.context ?? []), note] })
+    return next(notes.length === 0 ? e : { ...e, context: [...(e.context ?? []), ...notes] })
   }).catch(($, e, next) => next(e))
+
+  on('turn.complete', async ($, e, next) => {
+    const answered = await next(e)
+    if (e.agentId === undefined && !e.isAborted)
+      void checkCanary($).catch(error =>
+        $.ui.log(`meta-loadout could not check the canary: ${messageOf(error)}`, { to: 'debug' }),
+      )
+
+    return answered
+  })
 
   on('prompt.context', async ($, e, next) => {
     const answered = await next(e)
@@ -1496,6 +1607,7 @@ export const register: Register = on => {
           submitName($, typed, name => createProfile($, name, base)),
         ).catch(report),
       onSuggest: isOn => void inTurn($, () => setSuggestions($, isOn)).catch(report),
+      onSetup: () => void inTurn($, () => setupProject($)).catch(report),
       onChatAccess: isUnlocked =>
         void inTurn($, () => setChatAccess($, isUnlocked)).catch(report),
       onRefresh: () =>

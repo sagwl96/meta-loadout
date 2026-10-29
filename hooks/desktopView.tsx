@@ -57,6 +57,7 @@ const LOCK_ICONS = { locked: '🔒', unlocked: '🔓' } as const
 // Both emoji, so they draw at one size; each sits in a slot of one width.
 const REFRESH_ICON = '🔄'
 const SUGGEST_ICON = '💡'
+const SETUP_ICON = '🧰'
 const ICON_SLOT = 6
 const ICON_ROWS = 3
 const BAR_WIDTH = 18
@@ -419,6 +420,13 @@ export const drawDesktopPane = (
             tooltip. Written bottom icon first and drawn reversed, each tooltip paints over
             the icons below it. */}
         <Box flexDirection="column-reverse" gap={1}>
+          {iconButton(
+            'setup',
+            SETUP_ICON,
+            'Setup: make and apply a profile for this project, and start its context canary',
+            actions.onSetup,
+            false,
+          )}
           {iconButton(
             'refresh',
             REFRESH_ICON,

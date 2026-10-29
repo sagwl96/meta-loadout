@@ -18,6 +18,7 @@ export type PaneActions = {
   onCreateNew: (name: string, base: 'on' | 'off') => void
   onChatAccess: (isUnlocked: boolean) => void
   onSuggest: (isOn: boolean) => void
+  onSetup: () => void
   onRefresh: () => void
   onProject: (path: string) => void
   onUnset: (level: Level) => void
@@ -450,6 +451,9 @@ export const drawPane = (
               label={suggestLabel(isSuggestOn)}
               onPress={() => actions.onSuggest(!isSuggestOn)}
             />
+          </Box>
+          <Box key="setup-frame" {...FRAME}>
+            <Button key="setup" plain dimColor label="Setup" onPress={actions.onSetup} />
           </Box>
           <Box key="refresh-frame" {...FRAME}>
             <Button key="refresh" plain dimColor label="Refresh" onPress={actions.onRefresh} />

@@ -103,6 +103,8 @@ declare module 'claude-code' {
       isLoaded: boolean
       isChatUnlocked: boolean
       isSuggestOn: boolean
+      canaryPlanted: boolean
+      canaryTripped: boolean
       suggested: string[]
       seen: Item[]
       items: Item[]
