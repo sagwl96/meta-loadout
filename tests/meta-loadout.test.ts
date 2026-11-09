@@ -238,7 +238,7 @@ const startSession = ($: Engine) =>
 
 type MountedPane = Awaited<ReturnType<typeof mountPane>>
 
-const PROFILE_ACTIONS = ['apply', 'apply-project', 'apply-chat', 'duplicate', 'rename', 'delete']
+const PROFILE_ACTIONS = ['apply', 'apply-project', 'apply-chat', 'duplicate', 'rename', 'autocompact', 'delete']
 const MENU_BORDER_ROWS = 2
 const SKILL_TOGGLE = 'toggle:skill:ecc:plan'
 const PLUGIN_TOGGLE = `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:`
@@ -986,6 +986,33 @@ test('renames a profile that is not active from the command', async ($, on) => {
   expect(listed.text).toContain('* default')
   expect(listed.text).toContain('  ecc-react (0 overrides)')
   expect(listed.text).not.toContain('temp')
+})
+
+test('sets a profile autocompact window and puts the variable back without one', async ($, on) => {
+  harness(on)
+  const written: (string | undefined)[] = []
+  on('env.set', ($, e) => {
+    written.push(e.value)
+
+    return { value: {} }
+  })
+  await loadout($, 'new lean off')
+
+  const set = await loadout($, 'compact lean 300k')
+  const listed = await loadout($, 'list')
+  const bad = await loadout($, 'compact lean 50k')
+  const builtin = await loadout($, 'compact vanilla 300k')
+  await loadout($, 'use default')
+  const cleared = await loadout($, 'compact lean default')
+
+  expect(set.text).toBe('Profile "lean" autocompacts at 300k tokens.')
+  expect(listed.text).toContain('lean (0 overrides, autocompact 300k)')
+  expect(bad.text).toContain('100k to 1M')
+  expect(builtin.text).toContain('built in')
+  expect(cleared.text).toContain('keeps Claude Code')
+  expect(written[0]).toBe('300000')
+  expect(written.slice(1).every(value => value === undefined)).toBe(true)
+  expect(written.length).toBeGreaterThan(1)
 })
 
 test('refuses to rename a built-in profile, to a bad name or onto another profile', async ($, on) => {

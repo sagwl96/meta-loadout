@@ -12,6 +12,7 @@ import {
   PROFILE_KEY_PREFIX,
   UNSET_KEY_PREFIX,
   actionsOf,
+  compactFieldProps,
   bindingLabel,
   clipEnd,
   isUnsettable,
@@ -100,6 +101,10 @@ export const drawDesktopPane = (
   const shownProject = view.project === '' ? root : view.project
   const isRenaming =
     view.edit === 'rename' &&
+    !isFixedProfile(view.target) &&
+    profiles.some(one => one.name === view.target)
+  const isSettingCompact =
+    view.edit === 'autocompact' &&
     !isFixedProfile(view.target) &&
     profiles.some(one => one.name === view.target)
   const isCreating = view.edit === 'create-on' || view.edit === 'create-off'
@@ -553,6 +558,22 @@ export const drawDesktopPane = (
           </Box>
         )}
         {isRenaming && drawNameField('rename', actions.onRename)}
+        {isSettingCompact && (
+          <Box flexDirection="row" gap={1} alignItems="flex-end">
+            <Input
+              key="autocompact-tokens"
+              {...compactFieldProps(profiles.find(one => one.name === view.target))}
+              autoFocus
+              onSubmit={actions.onAutoCompact}
+            />
+            <Button
+              key="cancel-compact"
+              label="Cancel"
+              variant="secondary"
+              onPress={() => actions.onView({ edit: 'none' })}
+            />
+          </Box>
+        )}
       </Box>
       {view.notice !== '' && (
         <Box key="notice" {...CHIP} paddingY={1} borderColor={ACCENT}>

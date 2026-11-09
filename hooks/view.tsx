@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { Bindings, Item, Kind, Level, Picker, Profile, ProfileAction, Scope, View } from '../types'
-import { KINDS, KIND_LABELS, LEVELS, SCOPES, UNBOUND, isFixedProfile } from './model'
+import { COMPACT_HINT, KINDS, KIND_LABELS, LEVELS, SCOPES, UNBOUND, compactLabel, isFixedProfile } from './model'
 import { projectLabel } from './project'
 
 export type PaneElements = Pick<
@@ -15,6 +15,7 @@ export type PaneActions = {
   onAction: (name: string, action: ProfileAction) => void
   onCreate: (name: string) => void
   onRename: (name: string) => void
+  onAutoCompact: (tokens: string) => void
   onCreateNew: (name: string, base: 'on' | 'off') => void
   onChatAccess: (isUnlocked: boolean) => void
   onSuggest: (isOn: boolean) => void
@@ -86,6 +87,7 @@ const PROFILE_ACTIONS: readonly ProfileAction[] = [
   ...APPLY_ACTIONS,
   'duplicate',
   'rename',
+  'autocompact',
   'delete',
 ]
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = [...APPLY_ACTIONS, 'duplicate']
@@ -95,6 +97,7 @@ export const ACTION_LABELS: Readonly<Record<ProfileAction, string>> = {
   'apply-chat': 'Apply to chat',
   duplicate: 'Duplicate',
   rename: 'Rename',
+  autocompact: 'Autocompact',
   delete: 'Delete',
 }
 export const UNSET_KEY_PREFIX = 'unset:'
@@ -109,6 +112,16 @@ export const NAME_FIELDS = {
   new: { key: 'new-profile-name', verb: 'Duplicate', submitLabel: 'create' },
   rename: { key: 'rename-profile-name', verb: 'Rename', submitLabel: 'rename' },
 } as const
+
+// The typed field for a profile's autocompact window, shared by both panes.
+export const compactFieldProps = (profile: Profile | undefined) => ({
+  label: `Autocompact "${profile?.name ?? ''}" at`,
+  placeholder: COMPACT_HINT,
+  ...(profile?.autoCompactWindow === undefined
+    ? {}
+    : { value: compactLabel(profile.autoCompactWindow) }),
+  submitLabel: 'set',
+})
 
 export const clipEnd = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, Math.max(1, width - 1))}…` : text
@@ -214,6 +227,10 @@ export const drawPane = (
   const nameWidth = Math.floor(room * NAME_SHARE)
   const isRenaming =
     view.edit === 'rename' &&
+    !isFixedProfile(view.target) &&
+    profiles.some(one => one.name === view.target)
+  const isSettingCompact =
+    view.edit === 'autocompact' &&
     !isFixedProfile(view.target) &&
     profiles.some(one => one.name === view.target)
   const scopeOptions: PickerOption[] = [
@@ -495,6 +512,23 @@ export const drawPane = (
       {view.notice !== '' && <Text dimColor>{clipEnd(view.notice, columns * 2)}</Text>}
       {view.edit === 'new' && drawNameField('new', actions.onCreate)}
       {isRenaming && drawNameField('rename', actions.onRename)}
+      {isSettingCompact && (
+        <Box flexDirection="row" gap={1}>
+          <Input
+            key="autocompact-tokens"
+            {...compactFieldProps(profiles.find(one => one.name === view.target))}
+            autoFocus
+            onSubmit={actions.onAutoCompact}
+          />
+          <Button
+            key="cancel-compact"
+            plain
+            dimColor
+            label="Cancel"
+            onPress={() => actions.onView({ edit: 'none' })}
+          />
+        </Box>
+      )}
       <Box key="profile-tabs" flexDirection="row" gap={2} flexWrap="wrap" {...FRAME}>
         {profiles.map(drawProfile)}
         <Button

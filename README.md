@@ -157,6 +157,7 @@ To compose a setup from several harnesses, create a profile that starts with eve
 | `/meta-loadout unset <chat\|project>` | Removes the chat or project profile |
 | `/meta-loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
 | `/meta-loadout rename <profile> <new name>` | Renames a profile |
+| `/meta-loadout compact <profile> <tokens\|default>` | Sets the autocompact window (100k–1M, e.g. `300k`; Claude Code's default is 1M) for chats on that profile; also **Autocompact** in the profile menu |
 | `/meta-loadout delete <profile>` | Deletes a profile |
 | `/meta-loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
 | `/meta-loadout setup` | Makes a profile for this project if it has none, applies it to the project, and turns on its context canary |

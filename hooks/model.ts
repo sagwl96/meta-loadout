@@ -50,6 +50,49 @@ export const SCOPES: readonly Scope[] = [
 
 export const isValidProfileName = (name: string) => PROFILE_NAME.test(name)
 
+// Claude Code's own bounds for an autocompact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
+export const MIN_COMPACT_WINDOW = 100_000
+export const MAX_COMPACT_WINDOW = 1_000_000
+export const COMPACT_DEFAULT = 'default'
+export const COMPACT_HINT = '1M is the default · e.g. 300k'
+
+export const isValidCompactWindow = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= MIN_COMPACT_WINDOW &&
+  value <= MAX_COMPACT_WINDOW
+
+// Reads tokens as /autocompact does: "300k", "1m", "300000", or "300" for thousands.
+// "default" or nothing clears the profile's window; anything else is undefined.
+export const parseCompactWindow = (typed: string): number | 'default' | undefined => {
+  const text = typed.trim().toLowerCase().replace(/[,_\s]/g, '')
+  if (text === '' || text === COMPACT_DEFAULT) return COMPACT_DEFAULT
+  const number = parseFloat(text)
+  if (!/^\d+(\.\d+)?[km]?$/.test(text)) return undefined
+  const tokens = Math.round(
+    text.endsWith('m')
+      ? number * 1e6
+      : text.endsWith('k') || (number >= 100 && number <= 1000)
+        ? number * 1000
+        : number,
+  )
+
+  return isValidCompactWindow(tokens) ? tokens : undefined
+}
+
+export const compactLabel = (tokens: number | undefined) =>
+  tokens === undefined
+    ? COMPACT_DEFAULT
+    : tokens % 1e6 === 0
+      ? `${tokens / 1e6}M`
+      : `${tokens / 1000}k`
+
+export const withCompactWindow = (profile: Profile, tokens: number | undefined): Profile => {
+  const { autoCompactWindow, ...rest } = profile
+
+  return tokens === undefined ? rest : { ...rest, autoCompactWindow: tokens }
+}
+
 export const nameProblem = (profiles: readonly Profile[], name: string) => {
   if (name === '') return 'A profile name is required.'
   if (!isValidProfileName(name))

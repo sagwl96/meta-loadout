@@ -27,6 +27,7 @@ import {
 } from './inventory'
 import type { SettingsReading } from './inventory'
 import {
+  COMPACT_DEFAULT,
   DEFAULT_PROFILE_NAME,
   EMPTY_LEDGER,
   INITIAL_PROFILES,
@@ -35,6 +36,7 @@ import {
   UNBOUND,
   appliedNameFor,
   bindingMapOf,
+  compactLabel,
   desiredState,
   effectiveName,
   fallbackProfile,
@@ -44,10 +46,12 @@ import {
   isFixedProfile,
   isOnIn,
   isShownOn,
+  isValidCompactWindow,
   isValidProfileName,
   knownBindings,
   levelOf,
   nameProblem,
+  parseCompactWindow,
   projectKeyOf,
   removeProfile,
   renameProfile,
@@ -55,6 +59,7 @@ import {
   restoredProfiles,
   upsertProfile,
   withBinding,
+  withCompactWindow,
   withOverride,
   withoutName,
 } from './model'
@@ -121,10 +126,10 @@ const TOOL_NAME = 'profiles'
 const TOOL_ID = `mcp__${PLUGIN}__${TOOL_NAME}`
 const FILE_COMMAND = `${PLUGIN}:open`
 const ARGUMENT_HINT =
-  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | delete <profile> | lock | unlock | suggest <on|off> | project [<folder>] | setup]'
+  '[list | status | show [<profile>] | use <profile> [chat|project|global] | unset <chat|project> | new <profile> [on|off] | set <profile> <element> <on|off> | rename <profile> <new name> | compact <profile> <tokens|default> | delete <profile> | lock | unlock | suggest <on|off> | project [<folder>] | setup]'
 const USAGE = `Usage: /meta-loadout ${ARGUMENT_HINT}`
 const TOOL_DESCRIPTION =
-  "Reads or changes the user's meta-loadout harness profiles (which skills, MCP servers, plugins, rules and settings are on). `command` takes the words of /meta-loadout: list, status, show [<profile>], use <profile> [chat|project|global], unset <chat|project>, new <profile> [on|off], set <profile> <element> <on|off>, rename <profile> <new name>, delete <profile>. Reading always works; changes work only while the user has unlocked chat changes, and only the user can lock or unlock them."
+  "Reads or changes the user's meta-loadout harness profiles (which skills, MCP servers, plugins, rules and settings are on). `command` takes the words of /meta-loadout: list, status, show [<profile>], use <profile> [chat|project|global], unset <chat|project>, new <profile> [on|off], set <profile> <element> <on|off>, rename <profile> <new name>, compact <profile> <tokens|default> (autocompact window, 100k to 1M; default is 1M), delete <profile>. Reading always works; changes work only while the user has unlocked chat changes, and only the user can lock or unlock them."
 const LOCKED_NOTE =
   'Changing meta-loadout profiles from chat is locked. The user can allow it with /meta-loadout unlock, or the "Chat changes" button in the meta-loadout pane.'
 const LEVEL_PHRASES: Readonly<Record<Level, string>> = {
@@ -193,7 +198,8 @@ const isProfile = (value: unknown): value is Profile =>
   isValidProfileName(value.name) &&
   (value.base === 'on' || value.base === 'off') &&
   isObject(value.overrides) &&
-  Object.values(value.overrides).every(one => typeof one === 'boolean')
+  Object.values(value.overrides).every(one => typeof one === 'boolean') &&
+  (value.autoCompactWindow === undefined || isValidCompactWindow(value.autoCompactWindow))
 
 const settingsPaths = async ($: EngineInterface) =>
   pathsFrom(
@@ -302,6 +308,21 @@ const holdBindings = async ($: EngineInterface, bindings: Bindings) => {
   await update($, activeAtom, () => bindings.global)
   await update($, chatAtom, () => bindings.chat)
   await update($, projectAtom, () => bindings.project)
+}
+
+// What CLAUDE_CODE_AUTO_COMPACT_WINDOW held before a profile first set it, put back
+// when the chat moves to a profile without a window. The variable beats every setting.
+let envBeforeCompact: { value: string | undefined } | undefined
+
+const applyCompactWindow = async ($: EngineInterface) => {
+  const { autoCompactWindow } = await activeProfile($)
+  if (autoCompactWindow === undefined && envBeforeCompact === undefined) return
+  envBeforeCompact ??= { value: await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW') }
+  const value =
+    autoCompactWindow === undefined ? envBeforeCompact.value : String(autoCompactWindow)
+  const deny = (await $.env.set('CLAUDE_CODE_AUTO_COMPACT_WINDOW', value))?.deny
+  if (deny !== undefined)
+    $.ui.log(`meta-loadout could not set the autocompact window: ${deny}`, { to: 'debug' })
 }
 
 const shownProfile = async ($: EngineInterface) => {
@@ -550,6 +571,7 @@ const loadAll = async ($: EngineInterface) => {
   const isFirstRun = await load($)
   await refresh($)
   await update($, loadedAtom, () => true)
+  await applyCompactWindow($)
 
   return isFirstRun
 }
@@ -593,7 +615,10 @@ const syncFromStore = async ($: EngineInterface) => {
     findProfile(held.profiles, effectiveName(before)),
     findProfile(stored.profiles, effectiveName(after)),
   )
-  if (isApplyingOther) invalidateGates($)
+  if (isApplyingOther) {
+    invalidateGates($)
+    await applyCompactWindow($)
+  }
 }
 
 const inTurn = <Result,>(
@@ -773,6 +798,7 @@ const activate = async ($: EngineInterface, bindings: Bindings) => {
   await persistBindings($, bindings)
   await setView($, { viewed: effectiveName(bindings) })
   invalidateGates($)
+  await applyCompactWindow($)
 
   return outcome
 }
@@ -885,6 +911,29 @@ const submitName = async (
   return said
 }
 
+const setCompactWindow = async ($: EngineInterface, name: string, typed: string) => {
+  const profile = (await profilesOf($)).find(one => one.name === name)
+  if (profile === undefined) return say($, `No profile is named "${name}".`)
+  const refused = refusedProfile(profile)
+  if (refused !== undefined) return say($, refused)
+  const parsed = parseCompactWindow(typed)
+  if (parsed === undefined)
+    return say($, `Autocompact takes 100k to 1M tokens (like 300k), or "${COMPACT_DEFAULT}".`)
+  const tokens = parsed === COMPACT_DEFAULT ? undefined : parsed
+  await saveProfiles($, stored =>
+    stored.map(one => (one.name === name ? withCompactWindow(one, tokens) : one)),
+  )
+  await setView($, { edit: 'none' })
+  await applyCompactWindow($)
+
+  return say(
+    $,
+    tokens === undefined
+      ? `Profile "${name}" keeps Claude Code's own autocompact window (1M unless set elsewhere).`
+      : `Profile "${name}" autocompacts at ${compactLabel(tokens)} tokens.`,
+  )
+}
+
 const deleteProfile = async ($: EngineInterface, name: string) => {
   if (isFixedProfile(name))
     return say($, `"${name}" is built in and cannot be deleted.`)
@@ -921,8 +970,8 @@ const runProfileAction = async (
   name: string,
   action: ProfileAction,
 ) => {
-  if (action === 'duplicate' || action === 'rename') {
-    await setView($, { edit: action === 'duplicate' ? 'new' : 'rename', target: name })
+  if (action === 'duplicate' || action === 'rename' || action === 'autocompact') {
+    await setView($, { edit: action === 'duplicate' ? 'new' : action, target: name })
 
     return name
   }
@@ -1030,7 +1079,7 @@ const listProfiles = async ($: EngineInterface) => {
   return (await profilesOf($))
     .map(
       profile =>
-        `${profile.name === active.name ? '*' : ' '} ${profile.name} (${Object.keys(profile.overrides).length} overrides)${bindingTags(bindings, profile.name)}`,
+        `${profile.name === active.name ? '*' : ' '} ${profile.name} (${Object.keys(profile.overrides).length} overrides${profile.autoCompactWindow === undefined ? '' : `, autocompact ${compactLabel(profile.autoCompactWindow)}`})${bindingTags(bindings, profile.name)}`,
     )
     .join('\n')
 }
@@ -1071,6 +1120,7 @@ const showProfile = async ($: EngineInterface, name: string) => {
 
   return [
     `Profile "${profile.name}" starts with everything ${profile.base} and changes ${overrides.length} element${overrides.length === 1 ? '' : 's'}:`,
+    `  autocompact  ${compactLabel(profile.autoCompactWindow)}`,
     ...overrides.map(([id, isOn]) => `  ${isOn ? 'on ' : 'off'}  ${labelOf(id)}`),
   ].join('\n')
 }
@@ -1253,6 +1303,8 @@ const runCommand = async ($: EngineInterface, args: string, caller: Caller) => {
     return inTurn($, () => switchProfile($, name, option === '' ? 'global' : option))
   if (verb === 'unset' && isLevel(name)) return inTurn($, () => unsetProfile($, name))
   if (verb === 'delete' && name !== '') return inTurn($, () => deleteProfile($, name))
+  if (verb === 'compact' && name !== '' && option !== '')
+    return inTurn($, () => setCompactWindow($, name, words.slice(2).join(' ')))
   if (verb === 'rename' && name !== '' && option !== '')
     return inTurn($, () => renameTo($, name, option))
   if (verb === 'new' && name !== '')
@@ -1602,6 +1654,8 @@ export const register: Register = on => {
         void inTurn($, () =>
           submitName($, typed, name => renameTo($, view.target, name)),
         ).catch(report),
+      onAutoCompact: typed =>
+        void inTurn($, () => setCompactWindow($, view.target, typed)).catch(report),
       onCreateNew: (typed, base) =>
         void inTurn($, () =>
           submitName($, typed, name => createProfile($, name, base)),

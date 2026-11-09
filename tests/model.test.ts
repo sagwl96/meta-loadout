@@ -9,6 +9,8 @@ import {
   isEnabled,
   isValidProfileName,
   offMentions,
+  parseCompactWindow,
+  compactLabel,
   nameProblem,
   removeProfile,
   renameProfile,
@@ -257,5 +259,30 @@ describe('offMentions', () => {
     const DO: Item = { ...SKILL, id: 'skill:x:do', name: 'x:do' }
 
     expect(offMentions([DO], { name: 'p', base: 'off', overrides: {} }, 'do it', [])).toEqual([])
+  })
+})
+
+describe('parseCompactWindow', () => {
+  test('reads tokens the way /autocompact does', () => {
+    expect(parseCompactWindow('300k')).toBe(300_000)
+    expect(parseCompactWindow('1M')).toBe(1_000_000)
+    expect(parseCompactWindow('250000')).toBe(250_000)
+    expect(parseCompactWindow('400')).toBe(400_000)
+    expect(parseCompactWindow(' 1,000,000 ')).toBe(1_000_000)
+    expect(parseCompactWindow('')).toBe('default')
+    expect(parseCompactWindow('Default')).toBe('default')
+  })
+
+  test('refuses what Claude Code would refuse', () => {
+    expect(parseCompactWindow('50k')).toBeUndefined()
+    expect(parseCompactWindow('2m')).toBeUndefined()
+    expect(parseCompactWindow('lots')).toBeUndefined()
+    expect(parseCompactWindow('300kk')).toBeUndefined()
+  })
+
+  test('labels a window short', () => {
+    expect(compactLabel(1_000_000)).toBe('1M')
+    expect(compactLabel(300_000)).toBe('300k')
+    expect(compactLabel(undefined)).toBe('default')
   })
 })

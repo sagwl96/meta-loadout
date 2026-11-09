@@ -55,9 +55,11 @@ export type Profile = {
   name: string
   base: 'on' | 'off'
   overrides: Record<string, boolean>
+  // tokens at which a chat on this profile autocompacts; unset keeps Claude Code's own window
+  autoCompactWindow?: number
 }
 
-export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename' | 'create-on' | 'create-off'
+export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename' | 'autocompact' | 'create-on' | 'create-off'
 
 export type Picker = 'none' | 'project' | 'scope'
 
@@ -67,6 +69,7 @@ export type ProfileAction =
   | 'apply-chat'
   | 'duplicate'
   | 'rename'
+  | 'autocompact'
   | 'delete'
 
 export type Level = 'chat' | 'project' | 'global'
