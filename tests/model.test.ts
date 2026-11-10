@@ -20,7 +20,7 @@ import {
   withoutLegacyNames,
   withOverride,
 } from '../hooks/model'
-import { matchesQuery } from '../hooks/view'
+import { fileLinkOf, matchesQuery } from '../hooks/view'
 import type { Item, Profile } from '../types'
 
 const DEFAULT = INITIAL_PROFILES[0]!
@@ -284,5 +284,13 @@ describe('parseCompactWindow', () => {
     expect(compactLabel(1_000_000)).toBe('1M')
     expect(compactLabel(300_000)).toBe('300k')
     expect(compactLabel(undefined)).toBe('default')
+  })
+})
+
+describe('fileLinkOf', () => {
+  test('links POSIX and Windows paths, and nothing else', () => {
+    expect(fileLinkOf('/work/my app/CLAUDE.md')).toBe('file:///work/my%20app/CLAUDE.md')
+    expect(fileLinkOf('D:/Games/My App/CLAUDE.md')).toBe('file:///D:/Games/My%20App/CLAUDE.md')
+    expect(fileLinkOf('plugin:ecc')).toBeUndefined()
   })
 })

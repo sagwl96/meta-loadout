@@ -35,6 +35,7 @@ describe('profileNameFor', () => {
   test('names the profile after the folder, in profile-name characters', () => {
     expect(profileNameFor('/work/my app.v2')).toBe('my-app-v2')
     expect(profileNameFor('/')).toBe('project')
+    expect(profileNameFor('D:/GameDesign/TarmacTurnover')).toBe('TarmacTurnover')
     expect(profileNameFor(`/w/${'a'.repeat(60)}`)).toHaveLength(40)
   })
 })

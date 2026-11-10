@@ -179,10 +179,17 @@ export const linesOf = (
 
 export const menuKeyOf = (name: string) => `${MENU_KEY_PREFIX}${name}`
 
-export const fileLinkOf = (origin: string) =>
-  origin.startsWith('/')
-    ? `${FILE_SCHEME}${origin.replace(ORIGIN_NOTE, '').split('/').map(encodeURIComponent).join('/')}`
+const DRIVE_PATH = /^[A-Za-z]:\//
+
+export const fileLinkOf = (origin: string) => {
+  const path = origin.replace(ORIGIN_NOTE, '')
+  if (DRIVE_PATH.test(path))
+    return `${FILE_SCHEME}/${path.slice(0, 2)}${path.slice(2).split('/').map(encodeURIComponent).join('/')}`
+
+  return path.startsWith('/')
+    ? `${FILE_SCHEME}${path.split('/').map(encodeURIComponent).join('/')}`
     : undefined
+}
 
 export const drawBand = (
   { Box, Button }: Pick<PaneElements, 'Box' | 'Button'>,

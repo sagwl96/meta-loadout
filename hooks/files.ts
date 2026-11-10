@@ -11,14 +11,24 @@ const BACKUP_FOLDER = 'meta-loadout-backups'
 const JSON_INDENT = 2
 const UNSAFE_FILE_CHARACTERS = /[^A-Za-z0-9]+/g
 
+const BACKSLASHES = /\\/g
+const DRIVE_ROOT = /^[A-Za-z]:\//
+
+// Windows hands over D:\work\app; every path here is kept as D:/work/app.
+export const posixPathOf = <Path extends string | undefined>(path: Path): Path =>
+  (path === undefined ? path : path.replace(BACKSLASHES, '/')) as Path
+
 export const isAbsolute = (path: string | undefined): path is string =>
-  path !== undefined && path.startsWith('/')
+  path !== undefined && (path.startsWith('/') || DRIVE_ROOT.test(posixPathOf(path)))
 
 export const pathsFrom = (
-  home: string | undefined,
-  configDirOverride: string | undefined,
-  root: string,
+  rawHome: string | undefined,
+  rawConfigDir: string | undefined,
+  rawRoot: string,
 ): SettingsPaths => {
+  const root = posixPathOf(rawRoot)
+  const home = posixPathOf(rawHome)
+  const configDirOverride = posixPathOf(rawConfigDir)
   if (!isAbsolute(root)) throw new Error('the session has no absolute project root')
   if (!isAbsolute(configDirOverride) && !isAbsolute(home))
     throw new Error('neither CLAUDE_CONFIG_DIR nor HOME is an absolute path')

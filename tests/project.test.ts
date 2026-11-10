@@ -23,6 +23,17 @@ describe('project paths', () => {
     ])
   })
 
+  test('keeps the drive letter of a Windows folder', () => {
+    expect(ancestorsOf('D:/Games/Tarmac')).toEqual(['D:/Games', 'D:/Games/Tarmac'])
+    expect(ancestorsOf('D:\\Games\\Tarmac')).toEqual(['D:/Games', 'D:/Games/Tarmac'])
+  })
+
+  test('names the memory folder of a Windows project the way the engine does', () => {
+    expect(memoryFolderOf('C:/Users/me/.claude', 'D:/GameDesign/TarmacTurnover')).toBe(
+      'C:/Users/me/.claude/projects/D--GameDesign-TarmacTurnover/memory',
+    )
+  })
+
   test('names the memory folder the way the engine names a project', () => {
     expect(memoryFolderOf('/home/me/.claude-ecc', '/work/my app/.x')).toBe(
       '/home/me/.claude-ecc/projects/-work-my-app--x/memory',

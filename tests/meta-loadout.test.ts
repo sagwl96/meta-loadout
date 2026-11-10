@@ -81,6 +81,9 @@ const entriesUnder = (paths: readonly string[], folder: string) => {
   }))
 }
 
+// On Windows the engine hands the fs handlers C:\work\app for /work/app.
+const diskPath = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
+
 type World = {
   files?: Readonly<Record<string, string>>
   links?: readonly string[]
@@ -137,25 +140,25 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
   }))
   on('fs.exists', ($, e) => ({
     value:
-      disk.has(e.path) || [...disk.keys()].some(path => path.startsWith(`${e.path}/`)),
+      disk.has(diskPath(e.path)) || [...disk.keys()].some(path => path.startsWith(`${diskPath(e.path)}/`)),
   }))
-  on('fs.list', ($, e) => ({ value: entriesUnder([...disk.keys()], e.path) }))
+  on('fs.list', ($, e) => ({ value: entriesUnder([...disk.keys()], diskPath(e.path)) }))
   on('fs.stat', ($, e) => ({
     value: {
-      kind: disk.has(e.path) ? 'file' : 'dir',
+      kind: disk.has(diskPath(e.path)) ? 'file' : 'dir',
       size: 0,
       mtimeMs: 0,
-      isLink: (world.links ?? []).includes(e.path),
+      isLink: (world.links ?? []).includes(diskPath(e.path)),
     },
   }))
   on('fs.read', ($, e) => {
-    const text = disk.get(e.path)
-    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    const text = disk.get(diskPath(e.path))
+    if (text === undefined) throw new Error(`ENOENT ${diskPath(e.path)}`)
 
     return { value: text }
   })
   on('fs.write', ($, e) => {
-    disk.set(e.path, e.text)
+    disk.set(diskPath(e.path), e.text)
 
     return { value: undefined }
   })

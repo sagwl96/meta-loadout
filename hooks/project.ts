@@ -1,7 +1,7 @@
 import type { FsEntry, InstructionFile } from 'claude-code'
 
 import type { Item, Scope } from '../types'
-import { isAbsolute } from './files'
+import { isAbsolute, posixPathOf } from './files'
 import { instructionItem, sorted } from './inventory'
 
 export type FoundFile = Pick<InstructionFile, 'path' | 'kind'>
@@ -22,11 +22,17 @@ const FOLDER_NAME_SEPARATORS = /[^A-Za-z0-9]/g
 const SCOPES_OF_ONE_PROJECT: readonly Scope[] = ['project', 'local', 'memory']
 const SESSION_MARK = ' · session'
 
-export const ancestorsOf = (root: string): string[] =>
-  root
-    .split('/')
-    .filter(part => part !== '')
-    .map((_, index, parts) => `/${parts.slice(0, index + 1).join('/')}`)
+const DRIVE = /^[A-Za-z]:$/
+
+export const ancestorsOf = (root: string): string[] => {
+  const parts = posixPathOf(root).split('/').filter(part => part !== '')
+  const drive = DRIVE.test(parts[0] ?? '') ? parts[0] : undefined
+  const folders = drive === undefined ? parts : parts.slice(1)
+
+  return folders.map((_, index) =>
+    `${drive ?? ''}/${folders.slice(0, index + 1).join('/')}`,
+  )
+}
 
 export const memoryFolderOf = (configDir: string, root: string) =>
   `${configDir}/projects/${root.replace(FOLDER_NAME_SEPARATORS, '-')}/memory`
@@ -70,9 +76,9 @@ export const userFoldersOf = (
   configDir: string | undefined,
 ): string[] => [
   ...new Set(
-    [configDir, home === undefined ? undefined : `${home}/${HOME_CONFIG_FOLDER}`]
+    [configDir, home === undefined ? undefined : `${posixPathOf(home)}/${HOME_CONFIG_FOLDER}`]
       .filter(isAbsolute)
-      .map(folder => folder.replace(TRAILING_SLASHES, '')),
+      .map(folder => posixPathOf(folder).replace(TRAILING_SLASHES, '')),
   ),
 ]
 

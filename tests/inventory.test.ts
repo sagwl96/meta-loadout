@@ -36,6 +36,15 @@ describe('paths', () => {
     expect(() => pathsFrom('/home/me', '', '')).toThrow('absolute')
     expect(pathsFrom('/home/me', '', '/work/app').configDir).toBe('/home/me/.claude')
   })
+
+  test('takes Windows paths and keeps them with forward slashes', () => {
+    const paths = pathsFrom('C:\\Users\\me', undefined, 'D:\\Games\\Tarmac')
+    expect(paths.root).toBe('D:/Games/Tarmac')
+    expect(paths.user).toBe('C:/Users/me/.claude/settings.json')
+    expect(paths.project).toBe('D:/Games/Tarmac/.claude/settings.json')
+    expect(pathsFrom(undefined, 'C:/cfg', 'D:/Games').user).toBe('C:/cfg/settings.json')
+    expect(() => pathsFrom('C:\\Users\\me', undefined, 'Games\\Tarmac')).toThrow('absolute')
+  })
 })
 
 describe('instructionItem', () => {

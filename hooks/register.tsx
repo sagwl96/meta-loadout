@@ -4,10 +4,12 @@ import type { EngineInterface, PromptOrigin, Register } from 'claude-code'
 import type { Bindings, Item, Kind, Ledger, Level, Profile, ProfileAction, View } from '../types'
 import {
   backupPathOf,
+  isAbsolute,
   ledgerAfter,
   messageOf,
   parseJsonObject,
   pathsFrom,
+  posixPathOf,
   rewrittenSettings,
 } from './files'
 import {
@@ -201,11 +203,17 @@ const isProfile = (value: unknown): value is Profile =>
   Object.values(value.overrides).every(one => typeof one === 'boolean') &&
   (value.autoCompactWindow === undefined || isValidCompactWindow(value.autoCompactWindow))
 
+// Windows gives D:\work\app and may leave HOME unset; the hooks work in D:/work/app.
+const sessionRoot = async ($: EngineInterface) => posixPathOf(await $.session.root())
+
+const homeOf = async ($: EngineInterface) =>
+  (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+
 const settingsPaths = async ($: EngineInterface) =>
   pathsFrom(
-    await $.env.get('HOME'),
+    await homeOf($),
     await $.env.get('CLAUDE_CONFIG_DIR'),
-    await $.session.root(),
+    await sessionRoot($),
   )
 
 const readObject = async ($: EngineInterface, path: string) => {
@@ -248,7 +256,7 @@ const loadLedger = async ($: EngineInterface): Promise<Ledger> => {
 
 const bindingKeys = async ($: EngineInterface) => ({
   chat: await $.session.id(),
-  project: projectKeyOf(await $.session.root()),
+  project: projectKeyOf(await sessionRoot($)),
 })
 
 const storedMap = async ($: EngineInterface, level: Exclude<Level, 'global'>) =>
@@ -334,7 +342,7 @@ const shownProfile = async ($: EngineInterface) => {
 }
 
 const userFolders = async ($: EngineInterface) =>
-  userFoldersOf(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+  userFoldersOf(await homeOf($), await $.env.get('CLAUDE_CONFIG_DIR'))
 
 const focusShown = async ($: EngineInterface) => {
   try {
@@ -532,7 +540,7 @@ const loadProjectFiles = async ($: EngineInterface, project: string) => {
 
 const refreshProjects = async ($: EngineInterface) => {
   try {
-    const root = await $.session.root()
+    const root = await sessionRoot($)
     const projects = await existingOf($, visibleFolders(await $.fs.list(root), root), markersOf)
     await update($, projectsAtom, () => projects)
     await loadProjectFiles($, (await read($, viewAtom)).project)
@@ -542,9 +550,9 @@ const refreshProjects = async ($: EngineInterface) => {
 }
 
 const showProject = async ($: EngineInterface, typed: string) => {
-  const root = await $.session.root()
-  const named = typed.replace(TRAILING_SLASHES, '')
-  const path = named === '' || named.startsWith('/') ? named : `${root}/${named}`
+  const root = await sessionRoot($)
+  const named = posixPathOf(typed).replace(TRAILING_SLASHES, '')
+  const path = named === '' || isAbsolute(named) ? named : `${root}/${named}`
   const project = path === root ? '' : path
   const isFolder =
     project === '' ||
@@ -1207,12 +1215,12 @@ const projectSummary = async ($: EngineInterface, root: string) => {
 const storedCanaries = async ($: EngineInterface) => bindingMapOf(await $.store.get(CANARIES_KEY))
 
 const canaryWord = async ($: EngineInterface) =>
-  (await storedCanaries($))[projectKeyOf(await $.session.root())]
+  (await storedCanaries($))[projectKeyOf(await sessionRoot($))]
 
 // Makes this project's profile when it has none (the model picks the skills, agents and
 // MCP servers worth keeping), applies it to the project, and gives the project a canary.
 const setupProject = async ($: EngineInterface) => {
-  const root = projectKeyOf(await $.session.root())
+  const root = projectKeyOf(await sessionRoot($))
   const name = profileNameFor(root)
   let made = ''
   if (!(await profilesOf($)).some(profile => profile.name === name)) {
@@ -1625,7 +1633,7 @@ export const register: Register = on => {
 
     const model: PaneModel = {
       items: await shownItems($),
-      root: await $.session.root(),
+      root: await sessionRoot($),
       projects: await read($, projectsAtom),
       profiles: await profilesOf($),
       profile,
